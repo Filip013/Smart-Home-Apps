@@ -38,7 +38,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/power', label: 'Power Statistics', icon: Activity },
+    { path: '/power', label: 'Power & Climate', icon: Activity },
     { path: '/export', label: 'Export & Print', icon: FileDown },
     { path: '/settings', label: 'Settings', icon: Settings }
   ];
