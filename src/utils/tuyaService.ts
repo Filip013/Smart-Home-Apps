@@ -175,6 +175,20 @@ export const makeTuyaRequest = async (
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   body: any = null
 ): Promise<any> => {
+  // Sort query parameters alphabetically to satisfy Tuya's HMAC signing specification
+  let [basePath, queryString] = path.split('?');
+  if (queryString) {
+    const params = new URLSearchParams(queryString);
+    const sortedKeys = Array.from(params.keys()).sort();
+    const sortedParams = new URLSearchParams();
+    sortedKeys.forEach(key => {
+      const values = params.getAll(key);
+      values.forEach(val => sortedParams.append(key, val));
+    });
+    // Decode percent-encoded parameters to match Tuya's raw signature requirements
+    path = `${basePath}?${decodeURIComponent(sortedParams.toString())}`;
+  }
+
   const config = await getTuyaConfig();
   if (!config || !config.clientId || !config.clientSecret) {
     throw new Error("Tuya credentials not configured. Please complete setup in Settings.");

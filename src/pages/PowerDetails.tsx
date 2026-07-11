@@ -20,21 +20,50 @@ export const PowerDetails: React.FC = () => {
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [timeRange, setTimeRange] = useState<'24h' | '30d'>('24h');
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       const data = await fetchAllDeviceData();
       setPowerData(data.power);
       setMode(data.mode);
+      setLoading(false);
     };
     loadData();
   }, []);
 
-  if (!powerData) {
+  if (loading) {
     return (
       <div className="loading-screen">
         <Zap className="animate-spin text-accent" size={48} />
         <p>Loading power statistics...</p>
+      </div>
+    );
+  }
+
+  if (!powerData) {
+    return (
+      <div className="settings-view animate-fade-in" style={{ padding: '80px 24px 40px 24px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
+        <section className="dashboard-card glass" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Zap className="text-accent" size={28} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Smart Power Meter Unconfigured</h3>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
+              You must configure your Smart Power Meter Device ID in the Settings tab to view real-time consumption stats, cost details, and billing projections.
+            </p>
+          </div>
+          <button 
+            id="btn-goto-settings-power"
+            onClick={() => navigate('/settings')} 
+            className="btn primary" 
+            style={{ padding: '10px 24px', fontWeight: 600 }}
+          >
+            Go to Settings
+          </button>
+        </section>
       </div>
     );
   }

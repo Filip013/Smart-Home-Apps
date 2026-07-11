@@ -15,6 +15,7 @@ export const ExportPrint: React.FC = () => {
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [sensors, setSensors] = useState<TempSensor[]>([]);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
+  const [loading, setLoading] = useState(true);
   
   // Print configuration state
   const [includeKpis, setIncludeKpis] = useState(true);
@@ -25,15 +26,23 @@ export const ExportPrint: React.FC = () => {
 
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       const data = await fetchAllDeviceData();
       setPowerData(data.power);
       setSensors(data.sensors);
       setMode(data.mode);
+      if (!data.power) {
+        setIncludeKpis(false);
+        setIncludeCharts(false);
+        setIncludeBreakdown(false);
+        setIncludeTable(false);
+      }
+      setLoading(false);
     };
     loadData();
   }, []);
 
-  if (!powerData) {
+  if (loading) {
     return (
       <div className="loading-screen">
         <Zap className="animate-spin text-primary" size={48} />
@@ -42,8 +51,40 @@ export const ExportPrint: React.FC = () => {
     );
   }
 
+  // Setup Required View: if no devices are configured at all
+  if (sensors.length === 0 && !powerData) {
+    return (
+      <div className="settings-view animate-fade-in" style={{ padding: '80px 24px 40px 24px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
+        <section className="dashboard-card glass" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <FileDown className="text-primary" size={28} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>No Data Available for Export</h3>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
+              AetherSmart requires at least one active climate sensor or grid power meter configuration in the Settings tab to generate PDF print layouts or download CSV spreadsheets.
+            </p>
+          </div>
+          <button 
+            id="btn-goto-settings-export"
+            onClick={() => navigate('/settings')} 
+            className="btn primary" 
+            style={{ padding: '10px 24px', fontWeight: 600 }}
+          >
+            Go to Settings
+          </button>
+        </section>
+      </div>
+    );
+  }
+
   // Generate and download CSV
   const handleExportCSV = (type: 'hourly' | 'daily') => {
+    if (!powerData) {
+      alert("No power meter configuration available to export.");
+      return;
+    }
+
     let headers: string[] = [];
     let rows: string[][] = [];
     let filename = '';
@@ -128,30 +169,32 @@ export const ExportPrint: React.FC = () => {
             </div>
           </div>
           
-          <div className="settings-body">
+           <div className="settings-body">
             {/* CSV Exporter */}
-            <div className="settings-section">
-              <h4>Download CSV Spreadsheets</h4>
-              <p className="section-description">Export raw timeseries log records for local storage or analysis in Excel.</p>
-              <div className="btn-group-vertical">
-                <button 
-                  id="export-hourly-csv-btn"
-                  onClick={() => handleExportCSV('hourly')} 
-                  className="btn primary"
-                >
-                  <FileDown size={16} />
-                  <span>Download Hourly Load Log (24h)</span>
-                </button>
-                <button 
-                  id="export-daily-csv-btn"
-                  onClick={() => handleExportCSV('daily')} 
-                  className="btn secondary"
-                >
-                  <FileDown size={16} />
-                  <span>Download Daily Energy Log (30d)</span>
-                </button>
+            {powerData && (
+              <div className="settings-section">
+                <h4>Download CSV Spreadsheets</h4>
+                <p className="section-description">Export raw timeseries log records for local storage or analysis in Excel.</p>
+                <div className="btn-group-vertical">
+                  <button 
+                    id="export-hourly-csv-btn"
+                    onClick={() => handleExportCSV('hourly')} 
+                    className="btn primary"
+                  >
+                    <FileDown size={16} />
+                    <span>Download Hourly Load Log (24h)</span>
+                  </button>
+                  <button 
+                    id="export-daily-csv-btn"
+                    onClick={() => handleExportCSV('daily')} 
+                    className="btn secondary"
+                  >
+                    <FileDown size={16} />
+                    <span>Download Daily Energy Log (30d)</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Print configurator */}
             <div className="settings-section">
@@ -159,49 +202,53 @@ export const ExportPrint: React.FC = () => {
               <p className="section-description">Choose the components to include in the generated paper printout layout.</p>
               
               <div className="checkbox-list">
-                <label className="checkbox-label" htmlFor="chk-kpis">
-                  <input 
-                    type="checkbox" 
-                    id="chk-kpis"
-                    checked={includeKpis} 
-                    onChange={(e) => setIncludeKpis(e.target.checked)} 
-                  />
-                  <span className="checkbox-custom"></span>
-                  <span>Energy Summary Metrics (KPIs)</span>
-                </label>
+                {powerData && (
+                  <>
+                    <label className="checkbox-label" htmlFor="chk-kpis">
+                      <input 
+                        type="checkbox" 
+                        id="chk-kpis"
+                        checked={includeKpis} 
+                        onChange={(e) => setIncludeKpis(e.target.checked)} 
+                      />
+                      <span className="checkbox-custom"></span>
+                      <span>Energy Summary Metrics (KPIs)</span>
+                    </label>
 
-                <label className="checkbox-label" htmlFor="chk-charts">
-                  <input 
-                    type="checkbox" 
-                    id="chk-charts"
-                    checked={includeCharts} 
-                    onChange={(e) => setIncludeCharts(e.target.checked)} 
-                  />
-                  <span className="checkbox-custom"></span>
-                  <span>Power Load Curve Chart</span>
-                </label>
+                    <label className="checkbox-label" htmlFor="chk-charts">
+                      <input 
+                        type="checkbox" 
+                        id="chk-charts"
+                        checked={includeCharts} 
+                        onChange={(e) => setIncludeCharts(e.target.checked)} 
+                      />
+                      <span className="checkbox-custom"></span>
+                      <span>Power Load Curve Chart</span>
+                    </label>
 
-                <label className="checkbox-label" htmlFor="chk-breakdown">
-                  <input 
-                    type="checkbox" 
-                    id="chk-breakdown"
-                    checked={includeBreakdown} 
-                    onChange={(e) => setIncludeBreakdown(e.target.checked)} 
-                  />
-                  <span className="checkbox-custom"></span>
-                  <span>Appliance Power Share breakdown</span>
-                </label>
+                    <label className="checkbox-label" htmlFor="chk-breakdown">
+                      <input 
+                        type="checkbox" 
+                        id="chk-breakdown"
+                        checked={includeBreakdown} 
+                        onChange={(e) => setIncludeBreakdown(e.target.checked)} 
+                      />
+                      <span className="checkbox-custom"></span>
+                      <span>Appliance Power Share breakdown</span>
+                    </label>
 
-                <label className="checkbox-label" htmlFor="chk-table">
-                  <input 
-                    type="checkbox" 
-                    id="chk-table"
-                    checked={includeTable} 
-                    onChange={(e) => setIncludeTable(e.target.checked)} 
-                  />
-                  <span className="checkbox-custom"></span>
-                  <span>Historical Daily Consumption Table</span>
-                </label>
+                    <label className="checkbox-label" htmlFor="chk-table">
+                      <input 
+                        type="checkbox" 
+                        id="chk-table"
+                        checked={includeTable} 
+                        onChange={(e) => setIncludeTable(e.target.checked)} 
+                      />
+                      <span className="checkbox-custom"></span>
+                      <span>Historical Daily Consumption Table</span>
+                    </label>
+                  </>
+                )}
 
                 <label className="checkbox-label" htmlFor="chk-climate">
                   <input 
@@ -252,7 +299,7 @@ export const ExportPrint: React.FC = () => {
             </div>
 
             {/* KPIs */}
-            {includeKpis && (
+            {includeKpis && powerData && (
               <div className="print-section print-kpi-block">
                 <h3 className="print-sec-title">Energy Consumption Summary</h3>
                 <div className="print-kpi-grid">
@@ -277,7 +324,7 @@ export const ExportPrint: React.FC = () => {
             )}
 
             {/* Charts */}
-            {includeCharts && (
+            {includeCharts && powerData && (
               <div className="print-section print-avoid-break">
                 <h3 className="print-sec-title">Power Load Profile (24h Trend)</h3>
                 <div className="print-chart-box">
@@ -309,7 +356,7 @@ export const ExportPrint: React.FC = () => {
             )}
 
             {/* Breakdown */}
-            {includeBreakdown && (
+            {includeBreakdown && powerData && (
               <div className="print-section print-avoid-break">
                 <h3 className="print-sec-title">Power Allocation Breakdown</h3>
                 <table className="print-table">
@@ -334,7 +381,7 @@ export const ExportPrint: React.FC = () => {
             )}
 
             {/* Table of Daily History */}
-            {includeTable && (
+            {includeTable && powerData && (
               <div className="print-section print-avoid-break">
                 <h3 className="print-sec-title">Recent Daily Consumption Logs</h3>
                 <table className="print-table compact">

@@ -11,7 +11,8 @@ import {
   AlertTriangle,
   ArrowRight,
   ShieldCheck,
-  CheckCircle2
+  CheckCircle2,
+  Settings
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
@@ -19,97 +20,77 @@ export const Dashboard: React.FC = () => {
   const [sensors, setSensors] = useState<TempSensor[]>([]);
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
+  const [loading, setLoading] = useState(true);
 
   // Initialize data
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       const data = await fetchAllDeviceData();
       setSensors(data.sensors);
       setPowerData(data.power);
       setMode(data.mode);
+      setLoading(false);
     };
     loadData();
   }, []);
 
-  // Fluctuate data slightly to simulate real-time sensor streams
+  // Periodic live data sync from Tuya API (every 30 seconds)
   useEffect(() => {
-    if (sensors.length === 0 || !powerData) return;
+    if (sensors.length === 0 && !powerData) return;
 
-    const interval = setInterval(() => {
-      // Fluctuate temperature sensors
-      setSensors(prevSensors => 
-        prevSensors.map(sensor => {
-          const tempDelta = (Math.random() - 0.5) * 0.2;
-          const humDelta = Math.random() > 0.7 ? (Math.random() > 0.5 ? 1 : -1) : 0;
-          
-          const newTemp = Number((sensor.currentTemp + tempDelta).toFixed(1));
-          const newHum = Math.min(100, Math.max(0, sensor.currentHumidity + humDelta));
-          
-          // Also update the last element of history to match
-          const newHistory = [...sensor.history];
-          if (newHistory.length > 0) {
-            const lastIdx = newHistory.length - 1;
-            newHistory[lastIdx] = {
-              ...newHistory[lastIdx],
-              temp: newTemp,
-              humidity: newHum
-            };
-          }
-
-          return {
-            ...sensor,
-            currentTemp: newTemp,
-            currentHumidity: newHum,
-            history: newHistory
-          };
-        })
-      );
-
-      // Fluctuate power meter load
-      setPowerData(prevPower => {
-        if (!prevPower) return null;
-        const loadDelta = Math.round((Math.random() - 0.5) * 40); // +/- 20 Watts
-        const newLoad = Math.max(80, prevPower.currentLoad + loadDelta);
-        const voltDelta = Number(((Math.random() - 0.5) * 0.4).toFixed(1));
-        const newVolt = Number((prevPower.voltage + voltDelta).toFixed(1));
-        const newAmps = Number((newLoad / newVolt).toFixed(2));
-
-        const newHourly = [...prevPower.hourlyHistory];
-        if (newHourly.length > 0) {
-          const lastIdx = newHourly.length - 1;
-          newHourly[lastIdx] = {
-            ...newHourly[lastIdx],
-            loadWatts: newLoad,
-            voltage: newVolt,
-            currentAmps: newAmps
-          };
-        }
-
-        return {
-          ...prevPower,
-          currentLoad: newLoad,
-          voltage: newVolt,
-          currentAmps: newAmps,
-          hourlyHistory: newHourly
-        };
-      });
-    }, 4000);
+    const interval = setInterval(async () => {
+      try {
+        const data = await fetchAllDeviceData();
+        setSensors(data.sensors);
+        setPowerData(data.power);
+      } catch (err) {
+        console.error("Error refreshing live data:", err);
+      }
+    }, 30000); // Sync every 30 seconds
 
     return () => clearInterval(interval);
   }, [sensors.length, powerData]);
 
-  if (sensors.length === 0 || !powerData) {
+  if (loading) {
     return (
-      <div className="loading-screen">
+      <div className="loading-screen" style={{ height: '80vh' }}>
         <Zap className="animate-spin text-primary" size={48} />
-        <p>Connecting to smart devices...</p>
+        <p style={{ marginTop: '12px' }}>Connecting to smart devices...</p>
+      </div>
+    );
+  }
+
+  // Setup Required View: if no devices are configured
+  if (sensors.length === 0 && !powerData) {
+    return (
+      <div className="settings-view animate-fade-in" style={{ padding: '80px 24px 40px 24px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
+        <section className="dashboard-card glass" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Settings className="text-primary" size={28} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Smart Dashboard Setup Required</h3>
+            <p style={{ fontSize: '14px', color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
+              Your smart home dashboard is live, but no devices have been configured yet. Connect your temperature sensors and power meter in the Settings tab to start streaming real-time metrics.
+            </p>
+          </div>
+          <button 
+            id="btn-goto-settings-setup"
+            onClick={() => navigate('/settings')} 
+            className="btn primary" 
+            style={{ padding: '10px 24px', fontWeight: 600 }}
+          >
+            Configure Credentials & Device IDs
+          </button>
+        </section>
       </div>
     );
   }
 
   // Calculate live online device count
   const onlineDevicesCount = sensors.filter(s => s.status === 'online').length + 
-                             (powerData.name.includes('Offline') ? 0 : 1);
+                             (powerData ? (powerData.name.includes('Offline') ? 0 : 1) : 0);
 
   // Get greenhouse alerts
   const greenhouse = sensors.find(s => s.id === 'temp-greenhouse');
@@ -153,7 +134,7 @@ export const Dashboard: React.FC = () => {
             </div>
             <div>
               <span className="stat-label">Total Grid Load</span>
-              <span className="stat-value">{powerData.currentLoad.toLocaleString()} W</span>
+              <span className="stat-value">{powerData ? `${powerData.currentLoad.toLocaleString()} W` : 'Not Configured'}</span>
             </div>
           </div>
           <div className="hero-stat-card">
@@ -171,68 +152,90 @@ export const Dashboard: React.FC = () => {
       {/* Grid Layout: Power Widget vs Temperature Sensors */}
       <div className="dashboard-grid">
         
-        {/* Power Meter Quick Stat Widget */}
-        <section className="dashboard-card power-widget glass" aria-labelledby="power-widget-title">
-          <div className="card-header">
-            <div className="card-title-group">
-              <Zap className="card-icon text-accent" />
-              <h3 id="power-widget-title">Active Power Consumption</h3>
+        {/* Power Meter Widget */}
+        {powerData ? (
+          <section className="dashboard-card power-widget glass" aria-labelledby="power-widget-title">
+            <div className="card-header">
+              <div className="card-title-group">
+                <Zap className="card-icon text-accent" />
+                <h3 id="power-widget-title">Active Power Consumption</h3>
+              </div>
+              <button 
+                id="view-detailed-power-btn"
+                onClick={() => navigate('/power')} 
+                className="card-action-btn"
+                title="View full statistics"
+              >
+                <span>Full Stats</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+
+            <div className="power-realtime-grid">
+              <div className="realtime-dial">
+                <span className="dial-value">{powerData.currentLoad}</span>
+                <span className="dial-unit">WATTS</span>
+                <span className="dial-label">Active Load</span>
+              </div>
+
+              <div className="realtime-metrics">
+                <div className="metric-row">
+                  <span className="metric-name">Today's Usage</span>
+                  <span className="metric-val">{powerData.todayKwh} kWh</span>
+                </div>
+                <div className="metric-row">
+                  <span className="metric-name">Voltage</span>
+                  <span className="metric-val">{powerData.voltage} V</span>
+                </div>
+                <div className="metric-row">
+                  <span className="metric-name">Current Draw</span>
+                  <span className="metric-val">{powerData.currentAmps} A</span>
+                </div>
+                <div className="metric-row">
+                  <span className="metric-name">Est. Cost (Month)</span>
+                  <span className="metric-val">${powerData.estMonthlyCost.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="widget-chart-section">
+              <h4>24-Hour Load Profile (Watts)</h4>
+              <div className="chart-wrapper">
+                <LineAreaChart 
+                  data={powerData.hourlyHistory} 
+                  xKey="time" 
+                  yKey="loadWatts"
+                  yLabel="Load"
+                  color="var(--color-accent)"
+                  fillColor="url(#gradient-cyan)"
+                  height={160}
+                  valueSuffix="W"
+                  showMinMax={false}
+                />
+              </div>
+            </div>
+          </section>
+        ) : (
+          <section className="dashboard-card power-widget glass" aria-labelledby="power-widget-title" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '40px 24px', textAlign: 'center', gap: '16px' }}>
+            <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Zap className="text-primary" size={24} />
+            </div>
+            <div>
+              <h3 id="power-widget-title" style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Active Power Consumption</h3>
+              <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+                Grid power meter is not yet configured. Connect your smart electricity meter in settings to track real-time grid load, cost estimates, and billing statistics.
+              </p>
             </div>
             <button 
-              id="view-detailed-power-btn"
-              onClick={() => navigate('/power')} 
-              className="card-action-btn"
-              title="View full statistics"
+              id="btn-setup-power-meter"
+              onClick={() => navigate('/settings')} 
+              className="btn secondary" 
+              style={{ padding: '6px 16px', fontSize: '12px', border: '1px solid var(--color-border)' }}
             >
-              <span>Full Stats</span>
-              <ArrowRight size={14} />
+              Configure Power Meter
             </button>
-          </div>
-
-          <div className="power-realtime-grid">
-            <div className="realtime-dial">
-              <span className="dial-value">{powerData.currentLoad}</span>
-              <span className="dial-unit">WATTS</span>
-              <span className="dial-label">Active Load</span>
-            </div>
-
-            <div className="realtime-metrics">
-              <div className="metric-row">
-                <span className="metric-name">Today's Usage</span>
-                <span className="metric-val">{powerData.todayKwh} kWh</span>
-              </div>
-              <div className="metric-row">
-                <span className="metric-name">Voltage</span>
-                <span className="metric-val">{powerData.voltage} V</span>
-              </div>
-              <div className="metric-row">
-                <span className="metric-name">Current Draw</span>
-                <span className="metric-val">{powerData.currentAmps} A</span>
-              </div>
-              <div className="metric-row">
-                <span className="metric-name">Est. Cost (Month)</span>
-                <span className="metric-val">${powerData.estMonthlyCost.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="widget-chart-section">
-            <h4>24-Hour Load Profile (Watts)</h4>
-            <div className="chart-wrapper">
-              <LineAreaChart 
-                data={powerData.hourlyHistory} 
-                xKey="time" 
-                yKey="loadWatts"
-                yLabel="Load"
-                color="var(--color-accent)"
-                fillColor="url(#gradient-cyan)"
-                height={160}
-                valueSuffix="W"
-                showMinMax={false}
-              />
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* Temperature and Climate Monitors */}
         <section className="dashboard-card temperature-widget glass" aria-labelledby="climate-widget-title">
@@ -334,7 +337,7 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="tips-content">
-            <p>Your standby load is currently <strong>{Math.round(powerData.currentLoad * 0.08)} Watts</strong> (about 8% of your average load).</p>
+            <p>{powerData ? <>Your standby load is currently <strong>{Math.round(powerData.currentLoad * 0.08)} Watts</strong> (about 8% of your average load).</> : "Connect your smart power meter to receive active energy efficiency coaching recommendations."}</p>
             <ul className="tips-list">
               <li>💡 Turn off large media systems when sleeping to save ~45W standby power.</li>
               <li>🌡️ Greenhouse temperature is climbing. Consider venting it to prevent overheating.</li>
