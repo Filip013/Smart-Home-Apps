@@ -51,9 +51,9 @@ domain_map = {
 }
 target_domain = domain_map.get(region_code, 'openapi.tuyaeu.com')
 
-# sliding window setup (Last 24 Hours in UTC)
+# sliding window setup (Last 13 Hours in UTC to avoid Tuya's older corrupted/zero values)
 end_time_ms = int(datetime.utcnow().timestamp() * 1000)
-start_time_ms = end_time_ms - 24 * 60 * 60 * 1000
+start_time_ms = end_time_ms - 13 * 60 * 60 * 1000
 
 print(f"Sliding query window (UTC): {datetime.utcfromtimestamp(start_time_ms/1000.0)} to {datetime.utcfromtimestamp(end_time_ms/1000.0)}")
 
