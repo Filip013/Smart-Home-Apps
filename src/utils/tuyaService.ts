@@ -26,6 +26,13 @@ export interface TuyaConfig {
   voltageCode?: string;
   currentCode?: string;
   energyCode?: string;
+  // Custom Device Names & Locations
+  tempName1?: string;
+  tempLoc1?: string;
+  tempName2?: string;
+  tempLoc2?: string;
+  powerName?: string;
+  powerLoc?: string;
 }
 
 // Helper to choose proxy prefix depending on environment (localhost proxy vs production CORS bypass)

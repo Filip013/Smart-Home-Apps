@@ -359,7 +359,7 @@ export const fetchAllDeviceData = async (): Promise<{
   const sensorsPromises: Promise<TempSensor | null>[] = [];
   if (config.tempDeviceId1) {
     sensorsPromises.push(
-      fetchLiveTempSensor(config.tempDeviceId1, 'Living Room Sensor', 'Main Floor', {
+      fetchLiveTempSensor(config.tempDeviceId1, config.tempName1 || 'Living Room Sensor', config.tempLoc1 || 'Main Floor', {
         tempCode: config.tempCode1,
         humCode: config.humCode1
       })
@@ -367,7 +367,7 @@ export const fetchAllDeviceData = async (): Promise<{
   }
   if (config.tempDeviceId2) {
     sensorsPromises.push(
-      fetchLiveTempSensor(config.tempDeviceId2, 'Greenhouse Sensor', 'Backyard Garden', {
+      fetchLiveTempSensor(config.tempDeviceId2, config.tempName2 || 'Greenhouse Sensor', config.tempLoc2 || 'Backyard Garden', {
         tempCode: config.tempCode2,
         humCode: config.humCode2
       })
@@ -376,7 +376,7 @@ export const fetchAllDeviceData = async (): Promise<{
 
   let power: PowerMeter | null = null;
   if (config.powerDeviceId) {
-    power = await fetchLivePowerMeter(config.powerDeviceId, 'Main Grid Meter', {
+    power = await fetchLivePowerMeter(config.powerDeviceId, config.powerName || 'Main Grid Meter', {
       powerCode: config.powerCode,
       voltageCode: config.voltageCode,
       currentCode: config.currentCode,
