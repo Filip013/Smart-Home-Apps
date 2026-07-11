@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs at 00:30 UTC (2:30 AM CET/CEST) every day to gather the previous day's finalized data
     - cron: '30 0 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI for testing
+  workflow_dispatch: {} # Allows manual trigger from GitHub UI for testing
 
 jobs:
   record-history:
