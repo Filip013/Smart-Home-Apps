@@ -168,14 +168,42 @@ if power_device_id:
             peak_kw = round(kwh * 0.15, 1) # Estimated peak demand factor
             cost = round(kwh * 0.15, 2)    # Estimated billing rate ($0.15/kWh)
 
+            # Group energy logs by hour (0-23) for hourly history
+            by_hour = {h: [] for h in range(24)}
+            for log in sorted_logs:
+                log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
+                by_hour[log_time.hour].append(float(log['value']))
+
+            hourly_kwh = [0.0] * 24
+            if is_cumulative:
+                # Calculate cumulative consumption per hour
+                current_reading = start_val
+                hourly_last_readings = []
+                for h in range(24):
+                    if len(by_hour[h]) > 0:
+                        current_reading = by_hour[h][-1]
+                    hourly_last_readings.append(current_reading)
+                
+                prev_val = start_val
+                for h in range(24):
+                    diff = max(0.0, hourly_last_readings[h] - prev_val)
+                    hourly_kwh[h] = round(diff / scale, 3)
+                    prev_val = hourly_last_readings[h]
+            else:
+                # Incremental: sum all reports per hour
+                for h in range(24):
+                    hourly_kwh[h] = round(sum(by_hour[h]) / scale, 3)
+
             print(f"Calculation Result -> kWh: {kwh}, peakKw: {peak_kw}, cost: {cost} (Scale Divisor: {scale})")
+            print(f"Hourly energy consumption (kWh): {hourly_kwh}")
 
             # Save to Firestore
             energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
             energy_ref.set({
                 'kwh': kwh,
                 'peakKw': peak_kw,
-                'cost': cost
+                'cost': cost,
+                'hourly': hourly_kwh
             })
             print(f"Saved energy history to Firestore under document '{date_str}'.")
         else:
@@ -242,6 +270,48 @@ for sensor in sensors:
             if len(hums) > 0:
                 sensor_stats['avgHumidity'] = int(round(sum(hums) / len(hums)))
                 
+            # Calculate hourly averages for temperature and humidity
+            by_hour = {h: {'temps': [], 'hums': []} for h in range(24)}
+            for log in logs:
+                val = float(log['value'])
+                log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
+                h = log_time.hour
+                if log['code'] == sensor['temp_code']:
+                    by_hour[h]['temps'].append(val / 10.0 if val > 100.0 else val)
+                elif log['code'] == sensor['hum_code']:
+                    by_hour[h]['hums'].append(val / 10.0 if val > 100.0 else val)
+
+            avg_temp_day = sum(temps) / len(temps) if len(temps) > 0 else None
+            avg_hum_day = sum(hums) / len(hums) if len(hums) > 0 else None
+
+            # Sort logs by event time to get initial carry-forward values
+            sorted_temp_logs = sorted([l for l in logs if l['code'] == sensor['temp_code']], key=lambda x: int(x['event_time']))
+            sorted_hum_logs = sorted([l for l in logs if l['code'] == sensor['hum_code']], key=lambda x: int(x['event_time']))
+
+            last_temp = avg_temp_day
+            if len(sorted_temp_logs) > 0:
+                v = float(sorted_temp_logs[0]['value'])
+                last_temp = v / 10.0 if v > 100.0 else v
+
+            last_hum = avg_hum_day
+            if len(sorted_hum_logs) > 0:
+                v = float(sorted_hum_logs[0]['value'])
+                last_hum = v / 10.0 if v > 100.0 else v
+
+            hourly_stats = []
+            for h in range(24):
+                if len(by_hour[h]['temps']) > 0:
+                    last_temp = sum(by_hour[h]['temps']) / len(by_hour[h]['temps'])
+                if len(by_hour[h]['hums']) > 0:
+                    last_hum = sum(by_hour[h]['hums']) / len(by_hour[h]['hums'])
+
+                hourly_stats.append({
+                    'hour': h,
+                    'temp': round(last_temp, 1) if last_temp is not None else None,
+                    'humidity': int(round(last_hum)) if last_hum is not None else None
+                })
+
+            sensor_stats['hourly'] = hourly_stats
             climate_data[sensor['key']] = sensor_stats
             print(f"Climate Stats computed: {sensor_stats}")
         else:

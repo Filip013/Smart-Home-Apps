@@ -141,6 +141,27 @@ export const fetchFirestoreDailyPowerStats = async (
   }
 };
 
+// Query daily climate history from Firestore collection
+export const fetchFirestoreDailyClimateStats = async (
+  userId: string
+): Promise<{ date: string; sensors: any }[]> => {
+  try {
+    const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', userId, 'climateHistory');
+    const querySnapshot = await getDocs(colRef);
+    
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        date: doc.id, // YYYY-MM-DD
+        sensors: data.sensors || {}
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error("Error fetching Firestore daily climate stats:", error);
+    return [];
+  }
+};
+
 // Constant for SHA-256 of empty string
 const EMPTY_BODY_SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 

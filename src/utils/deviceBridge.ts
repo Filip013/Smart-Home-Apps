@@ -1,5 +1,6 @@
-import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats } from './tuyaService';
+import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats } from './tuyaService';
 import type { TempSensor, PowerMeter, TempReading } from './mockData';
+
 
 // Check if credentials are fully configured
 export const isLiveMode = async (): Promise<boolean> => {
@@ -244,6 +245,19 @@ export const fetchRealDailyPowerStats = async (
     return [];
   }
 };
+
+// Fetch daily climate statistics from Firestore (populated by GitHub Actions)
+export const fetchRealDailyClimateStats = async (): Promise<{ date: string; sensors: any }[]> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) return [];
+    return await fetchFirestoreDailyClimateStats(user.uid);
+  } catch (error) {
+    console.error("Error loading daily climate stats from Firestore:", error);
+    return [];
+  }
+};
+
 
 // Fetch live power meter statistics
 export const fetchLivePowerMeter = async (
