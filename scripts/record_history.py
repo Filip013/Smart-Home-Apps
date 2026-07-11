@@ -51,18 +51,11 @@ domain_map = {
 }
 target_domain = domain_map.get(region_code, 'openapi.tuyaeu.com')
 
-# Timestamps boundary setup (Yesterday UTC 00:00:00 to 23:59:59)
-yesterday = datetime.utcnow() - timedelta(days=1)
-start_of_yesterday = datetime.combine(yesterday, time.min)
-end_of_yesterday = datetime.combine(yesterday, time.max)
+# sliding window setup (Last 24 Hours in UTC)
+end_time_ms = int(datetime.utcnow().timestamp() * 1000)
+start_time_ms = end_time_ms - 24 * 60 * 60 * 1000
 
-start_time_ms = int(calendar.timegm(start_of_yesterday.timetuple()) * 1000)
-end_time_ms = int(calendar.timegm(end_of_yesterday.timetuple()) * 1000)
-date_str = yesterday.strftime('%Y-%m-%d') # YYYY-MM-DD
-
-print(f"Recording history for Date: {date_str}")
-print(f"Query window (UTC): {start_of_yesterday} to {end_of_yesterday}")
-print(f"Epoch Milliseconds: {start_time_ms} - {end_time_ms}")
+print(f"Sliding query window (UTC): {datetime.utcfromtimestamp(start_time_ms/1000.0)} to {datetime.utcfromtimestamp(end_time_ms/1000.0)}")
 
 def get_sha256(data_str):
     return hashlib.sha256(data_str.encode('utf-8')).hexdigest()
@@ -121,7 +114,7 @@ energy_code = config.get('energyCode', 'add_ele')
 
 if power_device_id:
     print(f"\nProcessing Energy Logs for device {power_device_id}...")
-    # Fetch energy logs for yesterday (type=7 for DP Reports)
+    # Fetch energy logs for the last 24h (type=7 for DP Reports)
     power_logs_res = make_tuya_request(
         f"/v1.0/devices/{power_device_id}/logs?codes={energy_code}&start_time={start_time_ms}&end_time={end_time_ms}&size=100&type=7",
         'GET',
@@ -133,9 +126,18 @@ if power_device_id:
         logs = power_logs_res.get('result', {}).get('logs', [])
         print(f"Retrieved {len(logs)} energy logs.")
         
-        if len(logs) > 0:
-            # Sort oldest to newest
-            sorted_logs = sorted(logs, key=lambda x: int(x['event_time']))
+        # Group logs by date
+        logs_by_date = {}
+        for log in logs:
+            dt = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
+            date_key = dt.strftime('%Y-%m-%d')
+            if date_key not in logs_by_date:
+                logs_by_date[date_key] = []
+            logs_by_date[date_key].append(log)
+            
+        for date_str, date_logs in logs_by_date.items():
+            print(f"Merging Energy history for Date: {date_str} ({len(date_logs)} logs)")
+            sorted_logs = sorted(date_logs, key=lambda x: int(x['event_time']))
             
             # Detect if cumulative or incremental
             is_cumulative = True
@@ -147,67 +149,75 @@ if power_device_id:
                     break
                 last_val = val
                 
-            raw_energy = 0
-            if is_cumulative:
-                # Cumulative: end value - start value of the day
-                start_val = float(sorted_logs[0]['value'])
-                end_val = float(sorted_logs[-1]['value'])
-                raw_energy = max(0.0, end_val - start_val)
-                max_val = end_val
-            else:
-                # Incremental: sum all reports
-                raw_energy = sum([float(log['value']) for log in sorted_logs])
-                max_val = max([float(log['value']) for log in sorted_logs])
-
+            max_val = max([float(log['value']) for log in sorted_logs])
             # Detect scale factor based on max reading size
-            scale = 100.0 # Default scale of 2 (0.01 kWh)
+            scale = 100.0
             if max_val > 1000.0:
-                scale = 1000.0 # Wh to kWh
+                scale = 1000.0
 
-            kwh = round(raw_energy / scale, 1)
-            peak_kw = round(kwh * 0.15, 1) # Estimated peak demand factor
-            cost = round(kwh * 0.15, 2)    # Estimated billing rate ($0.15/kWh)
+            # Get existing document from Firestore to merge
+            energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
+            energy_doc = energy_ref.get()
+            
+            if energy_doc.exists:
+                doc_data = energy_doc.to_dict()
+                start_val = doc_data.get('start_val', 0.0)
+                last_readings = doc_data.get('last_readings', [0.0] * 24)
+                hourly_kwh = doc_data.get('hourly', [0.0] * 24)
+            else:
+                start_val = 0.0
+                last_readings = [0.0] * 24
+                hourly_kwh = [0.0] * 24
 
-            # Group energy logs by hour (0-23) for hourly history
+            # Group date logs by hour
             by_hour = {h: [] for h in range(24)}
             for log in sorted_logs:
                 log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
                 by_hour[log_time.hour].append(float(log['value']))
 
-            hourly_kwh = [0.0] * 24
             if is_cumulative:
-                # Calculate cumulative consumption per hour
+                if start_val == 0.0 and len(sorted_logs) > 0:
+                    start_val = float(sorted_logs[0]['value'])
+                
+                # Update last readings for active hours
                 current_reading = start_val
-                hourly_last_readings = []
                 for h in range(24):
                     if len(by_hour[h]) > 0:
-                        current_reading = by_hour[h][-1]
-                    hourly_last_readings.append(current_reading)
-                
+                        last_readings[h] = by_hour[h][-1]
+                    elif last_readings[h] == 0.0:
+                        if h > 0:
+                            last_readings[h] = last_readings[h-1]
+                        else:
+                            last_readings[h] = start_val
+
+                # Calculate cumulative consumption per hour
                 prev_val = start_val
                 for h in range(24):
-                    diff = max(0.0, hourly_last_readings[h] - prev_val)
+                    diff = max(0.0, last_readings[h] - prev_val)
                     hourly_kwh[h] = round(diff / scale, 3)
-                    prev_val = hourly_last_readings[h]
+                    prev_val = last_readings[h]
             else:
-                # Incremental: sum all reports per hour
+                # Incremental: overwrite hours with new data
                 for h in range(24):
-                    hourly_kwh[h] = round(sum(by_hour[h]) / scale, 3)
+                    if len(by_hour[h]) > 0:
+                        hourly_kwh[h] = round(sum(by_hour[h]) / scale, 3)
 
-            print(f"Calculation Result -> kWh: {kwh}, peakKw: {peak_kw}, cost: {cost} (Scale Divisor: {scale})")
-            print(f"Hourly energy consumption (kWh): {hourly_kwh}")
+            kwh = round(sum(hourly_kwh), 1)
+            peak_kw = round(kwh * 0.15, 1)
+            cost = round(kwh * 0.15, 2)
 
-            # Save to Firestore
-            energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
+            print(f"Calculated -> Total kWh: {kwh}, Cost: {cost}")
+
+            # Save merged record to Firestore
             energy_ref.set({
                 'kwh': kwh,
                 'peakKw': peak_kw,
                 'cost': cost,
+                'start_val': start_val,
+                'last_readings': last_readings,
                 'hourly': hourly_kwh
             })
-            print(f"Saved energy history to Firestore under document '{date_str}'.")
-        else:
-            print("No energy logs reported for yesterday.")
+            print(f"Saved merged energy history to Firestore for date '{date_str}'.")
     else:
         print(f"Error fetching Tuya power logs: {power_logs_res.get('msg')}")
 else:
@@ -232,8 +242,6 @@ if config.get('tempDeviceId2'):
         'hum_code': config.get('humCode2', 'va_humidity')
     })
 
-climate_data = {}
-
 for sensor in sensors:
     print(f"\nProcessing Climate Logs for device {sensor['id']} ({sensor['key']})...")
     # Fetch logs for temperature and humidity (type=7 for DP Reports)
@@ -249,44 +257,57 @@ for sensor in sensors:
         logs = climate_res.get('result', {}).get('logs', [])
         print(f"Retrieved {len(logs)} climate logs.")
         
-        temps = []
-        hums = []
-        
+        # Group logs by date
+        logs_by_date = {}
         for log in logs:
-            val = float(log['value'])
-            if log['code'] == sensor['temp_code']:
-                # Scale temp
-                temps.append(val / 10.0 if val > 100.0 else val)
-            elif log['code'] == sensor['hum_code']:
-                # Scale humidity
-                hums.append(val / 10.0 if val > 100.0 else val)
-                
-        if len(temps) > 0 or len(hums) > 0:
-            sensor_stats = {}
-            if len(temps) > 0:
-                sensor_stats['avgTemp'] = round(sum(temps) / len(temps), 1)
-                sensor_stats['minTemp'] = round(min(temps), 1)
-                sensor_stats['maxTemp'] = round(max(temps), 1)
-            if len(hums) > 0:
-                sensor_stats['avgHumidity'] = int(round(sum(hums) / len(hums)))
-                
-            # Calculate hourly averages for temperature and humidity
+            dt = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
+            date_key = dt.strftime('%Y-%m-%d')
+            if date_key not in logs_by_date:
+                logs_by_date[date_key] = []
+            logs_by_date[date_key].append(log)
+            
+        for date_str, date_logs in logs_by_date.items():
+            print(f"Merging Climate history for Date: {date_str} ({len(date_logs)} logs)")
+            
+            # Get existing climate document from Firestore
+            climate_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/climateHistory/{date_str}')
+            climate_doc = climate_ref.get()
+            
+            if climate_doc.exists:
+                doc_data = climate_doc.to_dict()
+                climate_data = doc_data.get('sensors', {})
+                sensor_stats = climate_data.get(sensor['key'], {})
+                hourly_list = sensor_stats.get('hourly', [])
+                hourly_dict = {item['hour']: item for item in hourly_list}
+            else:
+                climate_data = {}
+                sensor_stats = {}
+                hourly_dict = {}
+
+            # Group date logs by hour
             by_hour = {h: {'temps': [], 'hums': []} for h in range(24)}
-            for log in logs:
+            all_temps = []
+            all_hums = []
+            
+            for log in date_logs:
                 val = float(log['value'])
                 log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
                 h = log_time.hour
                 if log['code'] == sensor['temp_code']:
-                    by_hour[h]['temps'].append(val / 10.0 if val > 100.0 else val)
+                    val_scaled = val / 10.0 if val > 100.0 else val
+                    by_hour[h]['temps'].append(val_scaled)
+                    all_temps.append(val_scaled)
                 elif log['code'] == sensor['hum_code']:
-                    by_hour[h]['hums'].append(val / 10.0 if val > 100.0 else val)
+                    val_scaled = val / 10.0 if val > 100.0 else val
+                    by_hour[h]['hums'].append(val_scaled)
+                    all_hums.append(val_scaled)
 
-            avg_temp_day = sum(temps) / len(temps) if len(temps) > 0 else None
-            avg_hum_day = sum(hums) / len(hums) if len(hums) > 0 else None
+            # Sort date logs to get initial carry-forward values
+            sorted_temp_logs = sorted([l for l in date_logs if l['code'] == sensor['temp_code']], key=lambda x: int(x['event_time']))
+            sorted_hum_logs = sorted([l for l in date_logs if l['code'] == sensor['hum_code']], key=lambda x: int(x['event_time']))
 
-            # Sort logs by event time to get initial carry-forward values
-            sorted_temp_logs = sorted([l for l in logs if l['code'] == sensor['temp_code']], key=lambda x: int(x['event_time']))
-            sorted_hum_logs = sorted([l for l in logs if l['code'] == sensor['hum_code']], key=lambda x: int(x['event_time']))
+            avg_temp_day = sum(all_temps) / len(all_temps) if len(all_temps) > 0 else None
+            avg_hum_day = sum(all_hums) / len(all_hums) if len(all_hums) > 0 else None
 
             last_temp = avg_temp_day
             if len(sorted_temp_logs) > 0:
@@ -298,36 +319,59 @@ for sensor in sensors:
                 v = float(sorted_hum_logs[0]['value'])
                 last_hum = v / 10.0 if v > 100.0 else v
 
-            hourly_stats = []
+            # Merge and update hourly dict
             for h in range(24):
-                if len(by_hour[h]['temps']) > 0:
-                    last_temp = sum(by_hour[h]['temps']) / len(by_hour[h]['temps'])
-                if len(by_hour[h]['hums']) > 0:
-                    last_hum = sum(by_hour[h]['hums']) / len(by_hour[h]['hums'])
+                has_data = len(by_hour[h]['temps']) > 0 or len(by_hour[h]['hums']) > 0
+                if has_data:
+                    h_temp = sum(by_hour[h]['temps']) / len(by_hour[h]['temps']) if len(by_hour[h]['temps']) > 0 else (hourly_dict.get(h, {}).get('temp') or last_temp)
+                    h_hum = sum(by_hour[h]['hums']) / len(by_hour[h]['hums']) if len(by_hour[h]['hums']) > 0 else (hourly_dict.get(h, {}).get('humidity') or last_hum)
+                    
+                    hourly_dict[h] = {
+                        'hour': h,
+                        'temp': round(h_temp, 1) if h_temp is not None else None,
+                        'humidity': int(round(h_hum)) if h_hum is not None else None
+                    }
+                else:
+                    # Carry forward if not already in hourly_dict
+                    if h not in hourly_dict:
+                        if h > 0 and (h-1) in hourly_dict:
+                            hourly_dict[h] = {
+                                'hour': h,
+                                'temp': hourly_dict[h-1]['temp'],
+                                'humidity': hourly_dict[h-1]['humidity']
+                            }
+                        else:
+                            hourly_dict[h] = {
+                                'hour': h,
+                                'temp': round(last_temp, 1) if last_temp is not None else None,
+                                'humidity': int(round(last_hum)) if last_hum is not None else None
+                            }
 
-                hourly_stats.append({
-                    'hour': h,
-                    'temp': round(last_temp, 1) if last_temp is not None else None,
-                    'humidity': int(round(last_hum)) if last_hum is not None else None
-                })
+            # Build final sorted list of 24 hourly values
+            final_hourly = [hourly_dict[h] for h in range(24)]
+            
+            # Recompute daily aggregates from merged hourly values
+            valid_temps = [item['temp'] for item in final_hourly if item['temp'] is not None]
+            valid_hums = [item['humidity'] for item in final_hourly if item['humidity'] is not None]
+            
+            if len(valid_temps) > 0:
+                sensor_stats['avgTemp'] = round(sum(valid_temps) / len(valid_temps), 1)
+                sensor_stats['minTemp'] = round(min(valid_temps), 1)
+                sensor_stats['maxTemp'] = round(max(valid_temps), 1)
+            if len(valid_hums) > 0:
+                sensor_stats['avgHumidity'] = int(round(sum(valid_hums) / len(valid_hums)))
 
-            sensor_stats['hourly'] = hourly_stats
+            sensor_stats['hourly'] = final_hourly
             climate_data[sensor['key']] = sensor_stats
-            print(f"Climate Stats computed: {sensor_stats}")
-        else:
-            print("No climate entries found in logs for yesterday.")
+            print(f"Merged Climate Stats: {sensor_stats}")
+
+            # Save back to Firestore
+            climate_ref.set({
+                'date': date_str,
+                'sensors': climate_data
+            }, merge=True)
+            print(f"Saved merged climate history to Firestore for date '{date_str}'.")
     else:
         print(f"Error fetching Tuya climate logs: {climate_res.get('msg')}")
-
-if len(climate_data) > 0:
-    # Save climate snapshot to Firestore
-    climate_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/climateHistory/{date_str}')
-    climate_ref.set({
-        'date': date_str,
-        'sensors': climate_data
-    })
-    print(f"\nSaved climate history to Firestore under document '{date_str}'.")
-else:
-    print("\nSkipping climate history: No climate logs gathered or no devices configured.")
 
 print("\nHistory recording run completed successfully.")

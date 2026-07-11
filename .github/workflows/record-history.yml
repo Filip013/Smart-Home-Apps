@@ -2,8 +2,8 @@ name: Record Daily Energy and Climate History
 
 on:
   schedule:
-    # Runs at 00:30 UTC (2:30 AM CET/CEST) every day to gather the previous day's finalized data
-    - cron: '30 0 * * *'
+    # Runs at 00:30 and 12:30 UTC every day to merge recent logs and prevent data loss from Tuya's short retention window
+    - cron: '30 0,12 * * *'
   workflow_dispatch: {} # Allows manual trigger from GitHub UI for testing
 
 jobs:
