@@ -123,8 +123,8 @@ export const PowerDetails: React.FC = () => {
   let maxHum = 0;
 
   if (timeRange === '24h') {
-    const temps = selectedSensor?.history.map(h => h.temp) || [];
-    const hums = selectedSensor?.history.map(h => h.humidity) || [];
+    const temps = (selectedSensor?.history.map(h => h.temp) || []).filter(t => t !== 0.0);
+    const hums = (selectedSensor?.history.map(h => h.humidity) || []).filter(h => h !== 0.0);
     avgTemp = temps.length > 0 ? Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)) : 0;
     minTemp = temps.length > 0 ? Math.min(...temps) : 0;
     maxTemp = temps.length > 0 ? Math.max(...temps) : 0;
@@ -132,10 +132,10 @@ export const PowerDetails: React.FC = () => {
     minHum = hums.length > 0 ? Math.min(...hums) : 0;
     maxHum = hums.length > 0 ? Math.max(...hums) : 0;
   } else {
-    const dailyTemps = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgTemp).filter((t): t is number => t !== undefined);
-    const dailyMins = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.minTemp).filter((t): t is number => t !== undefined);
-    const dailyMaxs = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.maxTemp).filter((t): t is number => t !== undefined);
-    const dailyHums = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgHumidity).filter((h): h is number => h !== undefined);
+    const dailyTemps = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyMins = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.minTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyMaxs = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.maxTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyHums = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgHumidity).filter((h): h is number => h !== undefined && h !== 0.0);
 
     avgTemp = dailyTemps.length > 0 ? Number((dailyTemps.reduce((a, b) => a + b, 0) / dailyTemps.length).toFixed(1)) : 0;
     minTemp = dailyMins.length > 0 ? Math.min(...dailyMins) : 0;

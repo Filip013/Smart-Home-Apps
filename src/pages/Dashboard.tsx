@@ -21,6 +21,7 @@ export const Dashboard: React.FC = () => {
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [loading, setLoading] = useState(true);
+  const [selectedMetrics, setSelectedMetrics] = useState<{ [sensorId: string]: 'temp' | 'humidity' }>({});
 
   // Initialize data
   useEffect(() => {
@@ -256,6 +257,7 @@ export const Dashboard: React.FC = () => {
           <div className="sensors-vertical-list">
             {sensors.map((sensor) => {
               const isGreenhouse = sensor.id === 'temp-greenhouse';
+              const activeMetric = selectedMetrics[sensor.id] || 'temp';
               
               // Comfort index helpers
               let comfortStatus = 'Optimal';
@@ -286,36 +288,92 @@ export const Dashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="sensor-readings-row">
-                    <div className="reading-block">
+                  <div className="sensor-readings-row" style={{ display: 'flex', gap: '12px' }}>
+                    <button 
+                      onClick={() => setSelectedMetrics(prev => ({ ...prev, [sensor.id]: 'temp' }))}
+                      className="reading-block"
+                      style={{ 
+                        cursor: 'pointer', 
+                        border: activeMetric === 'temp' ? '1px solid var(--color-primary)' : '1px solid var(--color-border)', 
+                        background: activeMetric === 'temp' ? 'rgba(99, 102, 241, 0.08)' : 'transparent', 
+                        textAlign: 'left', 
+                        flex: 1, 
+                        padding: '10px', 
+                        borderRadius: '8px', 
+                        transition: 'all 0.2s', 
+                        display: 'flex', 
+                        gap: '8px', 
+                        alignItems: 'center',
+                        boxShadow: activeMetric === 'temp' ? '0 0 10px rgba(99, 102, 241, 0.15)' : 'none'
+                      }}
+                      title="View Temperature Sparkline"
+                      onMouseOver={(e) => {
+                        if (activeMetric !== 'temp') {
+                          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                        }
+                      }}
+                      onMouseOut={(e) => {
+                        if (activeMetric !== 'temp') {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
+                      }}
+                    >
                       <Thermometer size={18} className="text-primary" />
                       <div>
-                        <span className="reading-value">{sensor.currentTemp.toFixed(1)}°C</span>
-                        <span className="reading-label">Temperature</span>
+                        <span className="reading-value" style={{ display: 'block', color: 'var(--color-text)' }}>{sensor.currentTemp.toFixed(1)}°C</span>
+                        <span className="reading-label" style={{ display: 'block', color: 'var(--color-text-muted)' }}>Temperature</span>
                       </div>
-                    </div>
+                    </button>
 
-                    <div className="reading-block">
+                    <button 
+                      onClick={() => setSelectedMetrics(prev => ({ ...prev, [sensor.id]: 'humidity' }))}
+                      className="reading-block"
+                      style={{ 
+                        cursor: 'pointer', 
+                        border: activeMetric === 'humidity' ? '1px solid var(--color-secondary)' : '1px solid var(--color-border)', 
+                        background: activeMetric === 'humidity' ? 'rgba(16, 185, 129, 0.08)' : 'transparent', 
+                        textAlign: 'left', 
+                        flex: 1, 
+                        padding: '10px', 
+                        borderRadius: '8px', 
+                        transition: 'all 0.2s', 
+                        display: 'flex', 
+                        gap: '8px', 
+                        alignItems: 'center',
+                        boxShadow: activeMetric === 'humidity' ? '0 0 10px rgba(16, 185, 129, 0.15)' : 'none'
+                      }}
+                      title="View Humidity Sparkline"
+                      onMouseOver={(e) => {
+                        if (activeMetric !== 'humidity') {
+                          e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                        }
+                      }}
+                      onMouseOut={(e) => {
+                        if (activeMetric !== 'humidity') {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }
+                      }}
+                    >
                       <Droplets size={18} className="text-secondary" />
                       <div>
-                        <span className="reading-value">{sensor.currentHumidity}%</span>
-                        <span className="reading-label">Humidity</span>
+                        <span className="reading-value" style={{ display: 'block', color: 'var(--color-text)' }}>{sensor.currentHumidity}%</span>
+                        <span className="reading-label" style={{ display: 'block', color: 'var(--color-text-muted)' }}>Humidity</span>
                       </div>
-                    </div>
+                    </button>
                   </div>
 
                   <div className="sensor-sparkline">
-                    <span className="sparkline-title">24-Hour Temperature Wave</span>
+                    <span className="sparkline-title">24-Hour {activeMetric === 'temp' ? 'Temperature' : 'Humidity'} Wave</span>
                     <div className="chart-wrapper mini">
                       <LineAreaChart 
                         data={sensor.history} 
                         xKey="time" 
-                        yKey="temp" 
-                        yLabel="Temp"
-                        color={isGreenhouse ? 'var(--color-warning)' : 'var(--color-primary)'}
-                        fillColor={isGreenhouse ? 'url(#gradient-amber)' : 'url(#gradient-indigo)'}
+                        yKey={activeMetric} 
+                        yLabel={activeMetric === 'temp' ? 'Temp' : 'Humidity'}
+                        color={activeMetric === 'temp' ? (isGreenhouse ? 'var(--color-warning)' : 'var(--color-primary)') : 'var(--color-secondary)'}
+                        fillColor={activeMetric === 'temp' ? (isGreenhouse ? 'url(#gradient-amber)' : 'url(#gradient-indigo)') : 'url(#gradient-emerald)'}
                         height={100}
-                        valueSuffix="°C"
+                        valueSuffix={activeMetric === 'temp' ? '°C' : '%'}
                         showMinMax={false}
                       />
                     </div>
