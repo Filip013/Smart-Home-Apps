@@ -1,0 +1,33 @@
+name: Record Daily Energy and Climate History
+
+on:
+  schedule:
+    # Runs at 00:30 UTC (2:30 AM CET/CEST) every day to gather the previous day's finalized data
+    - cron: '30 0 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI for testing
+
+jobs:
+  record-history:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests firebase-admin
+
+    - name: Run history recorder script
+      env:
+        TUYA_CLIENT_ID: ${{ secrets.TUYA_CLIENT_ID }}
+        TUYA_CLIENT_SECRET: ${{ secrets.TUYA_CLIENT_SECRET }}
+        FIREBASE_USER_UID: ${{ secrets.FIREBASE_USER_UID }}
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+      run: python scripts/record_history.py

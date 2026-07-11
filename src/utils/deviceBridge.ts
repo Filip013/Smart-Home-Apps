@@ -1,4 +1,4 @@
-import { getDeviceStatus, getTuyaConfig, makeTuyaRequest } from './tuyaService';
+import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats } from './tuyaService';
 import type { TempSensor, PowerMeter, TempReading } from './mockData';
 
 // Check if credentials are fully configured
@@ -230,39 +230,17 @@ export const fetchRealPowerHistory = async (
   }
 };
 
-// Fetch actual daily energy statistics from Tuya OpenAPI (last 30 days)
+// Fetch daily energy statistics from Firestore (populated by GitHub Actions)
 export const fetchRealDailyPowerStats = async (
-  deviceId: string,
-  energyCode: string
+  _deviceId: string,
+  _energyCode: string
 ): Promise<{ date: string; kwh: number; peakKw: number; cost: number }[]> => {
   try {
-    const now = new Date();
-    const end = now.toISOString().split('T')[0].replace(/-/g, '');
-    const start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0].replace(/-/g, '');
-
-    const res = await makeTuyaRequest(
-      `/v1.0/devices/${deviceId}/statistics/days?code=${energyCode}&start_date=${start}&end_date=${end}`,
-      'GET'
-    );
-
-    if (res && res.success === false) {
-      // Return empty and bypass warning to keep console clean for unsubscribed plans
-      return [];
-    }
-
-    const days = res?.result?.days || {};
-    return Object.keys(days).sort().map(dayKey => {
-      const kwh = Number(days[dayKey]) || 0;
-      const date = `${dayKey.slice(0, 4)}-${dayKey.slice(4, 6)}-${dayKey.slice(6, 8)}`;
-      return {
-        date,
-        kwh,
-        peakKw: Number((kwh * 0.15).toFixed(1)), // Estimated peak demand factor
-        cost: Number((kwh * 0.15).toFixed(2))   // Approximate cost billing rate ($0.15/kWh)
-      };
-    });
+    const user = auth.currentUser;
+    if (!user) return [];
+    return await fetchFirestoreDailyPowerStats(user.uid);
   } catch (error) {
-    console.error("Error fetching real daily power statistics:", error);
+    console.error("Error loading daily stats from Firestore:", error);
     return [];
   }
 };
@@ -296,7 +274,8 @@ export const fetchLivePowerMeter = async (
     const currentLoad = powerStatus ? Math.round(scalePower(powerStatus.value)) : 0;
     const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
     const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
-    const todayKwh = energyStatus ? parseTuyaVal(energyStatus.value, 1) : 0;
+    const todayKwhRaw = energyStatus ? Number(energyStatus.value) || 0 : 0;
+    const todayKwh = Number((todayKwhRaw > 1000 ? todayKwhRaw / 1000 : todayKwhRaw / 100).toFixed(2));
 
     // Fetch actual real logs
     const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode);

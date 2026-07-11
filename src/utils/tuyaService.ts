@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { 
   getAuth, 
   GoogleAuthProvider, 
@@ -112,6 +112,33 @@ export const getTuyaConfig = async (): Promise<TuyaConfig | null> => {
   // Fallback to LocalStorage
   const localData = localStorage.getItem('tuya_config');
   return localData ? JSON.parse(localData) : null;
+};
+
+// Query daily energy history from Firestore collection
+export const fetchFirestoreDailyPowerStats = async (
+  userId: string
+): Promise<{ date: string; kwh: number; peakKw: number; cost: number }[]> => {
+  try {
+    const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', userId, 'energyHistory');
+    const querySnapshot = await getDocs(colRef);
+    
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      const kwh = Number(data.kwh) || 0;
+      // Default fallback calculations for peak demand and approximate billing costs if not stored
+      const peakKw = data.peakKw !== undefined ? Number(data.peakKw) : Number((kwh * 0.15).toFixed(1));
+      const cost = data.cost !== undefined ? Number(data.cost) : Number((kwh * 0.15).toFixed(2));
+      return {
+        date: doc.id, // YYYY-MM-DD
+        kwh,
+        peakKw,
+        cost
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error("Error fetching Firestore daily stats:", error);
+    return [];
+  }
 };
 
 // Constant for SHA-256 of empty string
