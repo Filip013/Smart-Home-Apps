@@ -56,7 +56,7 @@ const scaleCurrent = (val: any): number => {
   return num;
 };
 
-// Query actual 24h temperature logs from Tuya OpenAPI (using correct parameters: codes, type=7, milliseconds, size=100)
+// Query actual 24h temperature logs from Tuya OpenAPI (paginating to ensure we get the full 24h of data)
 export const fetchRealTempHistory = async (
   deviceId: string,
   tCode: string,
@@ -67,19 +67,41 @@ export const fetchRealTempHistory = async (
     const endTime = Date.now();
     const startTime = endTime - 24 * 60 * 60 * 1000; // 24 hours ago in milliseconds
 
-    // Fetch temperature and humidity logs in a single call using type=7 (DP reports)
-    const res = await makeTuyaRequest(
-      `/v1.0/devices/${deviceId}/logs?codes=${tCode},${hCode}&start_time=${startTime}&end_time=${endTime}&size=100&type=7`,
-      'GET'
-    );
+    let allLogs: any[] = [];
+    let lastRowKey = '';
+    let hasMore = true;
+    let pageCount = 0;
 
-    if (res && res.success === false) {
-      console.warn(`Tuya API returned success:false for Temp Logs: ${res.msg}`);
-      return [];
+    // Paginate using V2 API to retrieve up to 10 pages (1000 logs max) to cover active sensors
+    while (hasMore && pageCount < 10) {
+      const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
+      
+      const res = await makeTuyaRequest(
+        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${tCode},${hCode}&start_time=${startTime}&end_time=${endTime}&size=100${rowKeyParam}`,
+        'GET'
+      );
+
+      console.log(`[Temp Logs Page ${pageCount}] V2 Raw Response:`, res);
+
+      if (res && res.success === false) {
+        console.warn(`Tuya API returned success:false for Temp Logs: ${res.msg}`);
+        break;
+      }
+
+      const pageLogs = res?.result?.logs || [];
+      allLogs = allLogs.concat(pageLogs);
+      
+      hasMore = res?.result?.has_more || false;
+      lastRowKey = res?.result?.last_row_key || '';
+      pageCount++;
+
+      if (pageLogs.length === 0 || !lastRowKey) {
+        break;
+      }
     }
 
-    const logs = res?.result?.logs || [];
-    if (logs.length === 0) return [];
+    if (allLogs.length === 0) return [];
+    const logs = allLogs;
 
     // Group logs into hourly buckets
     const hourlyData: { [hour: string]: { temps: number[]; hums: number[] } } = {};
@@ -172,7 +194,7 @@ export const fetchLiveTempSensor = async (
   }
 };
 
-// Query actual 24h power consumption logs from Tuya OpenAPI (using correct parameters: codes, type=7, milliseconds, size=100)
+// Query actual 24h power consumption logs from Tuya OpenAPI (paginating using V2 API to ensure we get full 24h of data)
 export const fetchRealPowerHistory = async (
   deviceId: string,
   powerCode: string
@@ -182,19 +204,39 @@ export const fetchRealPowerHistory = async (
     const endTime = Date.now();
     const startTime = endTime - 24 * 60 * 60 * 1000; // 24 hours ago in milliseconds
 
-    // Fetch power logs using plural codes parameter with type=7 (DP reports)
-    const powerRes = await makeTuyaRequest(
-      `/v1.0/devices/${deviceId}/logs?codes=${powerCode}&start_time=${startTime}&end_time=${endTime}&size=100&type=7`,
-      'GET'
-    );
+    let allLogs: any[] = [];
+    let lastRowKey = '';
+    let hasMore = true;
+    let pageCount = 0;
 
-    if (powerRes && powerRes.success === false) {
-      console.warn(`Tuya API returned success:false for Power Logs: ${powerRes.msg}`);
-      return [];
+    // Paginate using V2 API to retrieve up to 10 pages (1000 logs max)
+    while (hasMore && pageCount < 10) {
+      const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
+      
+      const res = await makeTuyaRequest(
+        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${powerCode}&start_time=${startTime}&end_time=${endTime}&size=100${rowKeyParam}`,
+        'GET'
+      );
+
+      if (res && res.success === false) {
+        console.warn(`Tuya API returned success:false for Power Logs: ${res.msg}`);
+        break;
+      }
+
+      const pageLogs = res?.result?.logs || [];
+      allLogs = allLogs.concat(pageLogs);
+      
+      hasMore = res?.result?.has_more || false;
+      lastRowKey = res?.result?.last_row_key || '';
+      pageCount++;
+
+      if (pageLogs.length === 0 || !lastRowKey) {
+        break;
+      }
     }
 
-    const pLogs = powerRes?.result?.logs || [];
-    if (pLogs.length === 0) return [];
+    if (allLogs.length === 0) return [];
+    const pLogs = allLogs;
 
     const hourlyData: { [hour: string]: number[] } = {};
     const now = new Date();

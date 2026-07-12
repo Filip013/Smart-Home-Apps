@@ -398,7 +398,7 @@ export const getDeviceLogs = async (
   startHourTime: number,
   endHourTime: number
 ): Promise<any> => {
-  const query = `?codes=${dpCodes}&start_time=${startHourTime}&end_time=${endHourTime}&size=100`;
+  const query = `?codes=${dpCodes}&start_time=${startHourTime}&end_time=${endHourTime}&size=1000`;
   const data = await makeTuyaRequest(`/v1.0/devices/${deviceId}/logs${query}`, 'GET');
   if (!data.success) {
     throw new Error(data.msg || `Failed to fetch logs for ${deviceId}`);
