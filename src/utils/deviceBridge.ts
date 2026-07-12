@@ -355,8 +355,31 @@ export const fetchLivePowerMeter = async (
     const currentLoad = powerStatus ? Number(scalePower(powerStatus.value).toFixed(1)) : 0;
     const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
     const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
-    const todayKwhRaw = energyStatus ? Number(energyStatus.value) || 0 : 0;
-    const todayKwh = Number((todayKwhRaw > 1000 ? todayKwhRaw / 1000 : todayKwhRaw / 100).toFixed(2));
+    // Calculate today's total kWh by summing add_ele logs from midnight to now
+    let todayKwh = 0;
+    try {
+      const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const nowTime = now.getTime();
+      
+      const energyLogsRes = await makeTuyaRequest(
+        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${eCode}&start_time=${midnight}&end_time=${nowTime}&size=100`,
+        'GET'
+      );
+      
+      if (energyLogsRes && energyLogsRes.success) {
+        const logs = energyLogsRes.result?.logs || [];
+        const sumRaw = logs.reduce((acc: number, log: any) => acc + (Number(log.value) || 0), 0);
+        todayKwh = Number((sumRaw / 1000).toFixed(2));
+      }
+    } catch (err) {
+      console.warn("Failed to calculate live todayKwh from logs, falling back to instant DP:", err);
+    }
+
+    if (todayKwh === 0) {
+      const todayKwhRaw = energyStatus ? Number(energyStatus.value) || 0 : 0;
+      todayKwh = Number((todayKwhRaw / 1000).toFixed(2));
+    }
 
     // Fetch actual real logs
     const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode);

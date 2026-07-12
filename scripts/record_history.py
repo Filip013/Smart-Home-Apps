@@ -149,11 +149,8 @@ if power_device_id:
                     break
                 last_val = val
                 
-            max_val = max([float(log['value']) for log in sorted_logs])
-            # Detect scale factor based on max reading size
-            scale = 100.0
-            if max_val > 1000.0:
-                scale = 1000.0
+            # Scale is 1000.0 for add_ele (thousandths of a kWh)
+            scale = 1000.0
 
             # Get existing document from Firestore to merge
             energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
