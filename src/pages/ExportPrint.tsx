@@ -103,6 +103,8 @@ export const ExportPrint: React.FC = () => {
     }
   };
 
+  const selectedSensor = selectedSensorKey === 'sensor1' ? sensors[0] : sensors[1];
+
   const powerDailyData = powerData
     ? powerData.dailyHistory
         .filter(d => d.date.startsWith(selectedMonth))
@@ -375,7 +377,7 @@ export const ExportPrint: React.FC = () => {
             <span className="preview-hint" style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>This preview shows exactly what will be printed.</span>
           </div>
 
-          <div className="printable-sheet glass" style={{ padding: '30px', backgroundColor: 'var(--color-card-bg)', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+          <div className="printable-sheet" style={{ borderRadius: '8px' }}>
             {/* Print Header */}
             <div className="print-report-header" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid var(--color-border)', paddingBottom: '20px', marginBottom: '24px' }}>
               <div>
@@ -384,7 +386,7 @@ export const ExportPrint: React.FC = () => {
               </div>
               <div style={{ textAlign: 'right', fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
                 <div><strong>Selected Month:</strong> {selectedMonth}</div>
-                <div><strong>Climate Source:</strong> {sensors.find(s => s.id === selectedSensorKey)?.name || selectedSensorKey}</div>
+                <div><strong>Climate Source:</strong> {selectedSensor?.name || selectedSensorKey}</div>
                 <div><strong>Generated:</strong> {new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })}</div>
               </div>
             </div>

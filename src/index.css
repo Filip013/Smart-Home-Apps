@@ -1116,6 +1116,13 @@ body {
   box-shadow: var(--shadow-lg);
   font-family: var(--font-sans);
   border: 1px solid #e2e8f0;
+  
+  /* Enforce light-theme color values for charts and components inside the report printout */
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-grid-line: #cbd5e1;
+  --color-border: #cbd5e1;
+  --color-card-bg: #ffffff;
 }
 
 /* Print styling components */

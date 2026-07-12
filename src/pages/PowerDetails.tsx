@@ -407,7 +407,7 @@ export const PowerDetails: React.FC = () => {
               onClick={() => setTimeRange('24h')}
             >
               <Clock size={14} />
-              <span>24h Profile</span>
+              <span>Daily Profile</span>
             </button>
             <button 
               id="tab-range-30d"
@@ -415,7 +415,7 @@ export const PowerDetails: React.FC = () => {
               onClick={() => setTimeRange('30d')}
             >
               <Calendar size={14} />
-              <span>30-Day History</span>
+              <span>Monthly History</span>
             </button>
           </div>
         </div>
