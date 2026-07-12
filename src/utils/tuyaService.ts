@@ -17,6 +17,7 @@ export interface TuyaConfig {
   tempDeviceId1: string;
   tempDeviceId2: string;
   powerDeviceId: string;
+  customProxyUrl?: string; // Custom private CORS proxy (e.g. Cloudflare Worker)
   // Dynamic DP codes mapping
   tempCode1?: string;
   humCode1?: string;
@@ -39,7 +40,11 @@ export interface TuyaConfig {
 const FORCE_PRODUCTION_PROXY = false;
 
 // Helper to construct fetch URL depending on environment (localhost proxy vs production CORS bypass with URL encoding and cache-busting)
-const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: string): string => {
+const constructFetchUrl = (
+  region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in',
+  path: string,
+  headers?: Record<string, string>
+): string => {
   if (!FORCE_PRODUCTION_PROXY && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     return `/tuya-${region}${path}`;
   }
@@ -54,11 +59,30 @@ const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: 
   const targetDomain = domainMap[region] || 'openapi.tuyaeu.com';
   const targetUrl = `https://${targetDomain}${path}`;
   
+  // Check if user has set a custom CORS proxy URL (e.g. their own Cloudflare Worker)
+  const localData = localStorage.getItem('tuya_config');
+  const config = localData ? JSON.parse(localData) as TuyaConfig : null;
+  const customProxyUrl = config?.customProxyUrl?.trim();
+
+  if (customProxyUrl) {
+    // With a custom Cloudflare Worker proxy, we don't need reqHeaders/resHeaders hacks
+    // because the Worker is programmed to forward all incoming headers directly!
+    return `${customProxyUrl}?url=${encodeURIComponent(targetUrl)}&_cb=${Date.now()}`;
+  }
+  
   // Custom CORS preflight request headers allowed by corsproxy.io
   const allowedHeaders = 'client_id,access_token,sign,t,sign_method,content-type';
+  let proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}&resHeaders=access-control-allow-headers:${encodeURIComponent(allowedHeaders)}`;
   
-  // recommended format: https://corsproxy.io/?url=TARGET_URL&resHeaders=...&_cb=Date.now()
-  return `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}&resHeaders=access-control-allow-headers:${encodeURIComponent(allowedHeaders)}&_cb=${Date.now()}`;
+  // Forward custom request headers to Tuya by passing them via repeated reqHeaders query parameters
+  if (headers) {
+    Object.entries(headers).forEach(([key, val]) => {
+      proxyUrl += `&reqHeaders=${key}:${encodeURIComponent(val)}`;
+    });
+  }
+  
+  proxyUrl += `&_cb=${Date.now()}`;
+  return proxyUrl;
 };
 
 // Hardcoded Firebase configuration provided by the user
@@ -251,16 +275,17 @@ export const getAccessToken = async (config: TuyaConfig): Promise<string> => {
   const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
 
   const region = config.region || 'eu';
-  const fetchUrl = constructFetchUrl(region, path);
+  const reqHeaders = {
+    'client_id': config.clientId,
+    'sign': sign,
+    't': t,
+    'sign_method': 'HMAC-SHA256'
+  };
+  const fetchUrl = constructFetchUrl(region, path, reqHeaders);
   
   const response = await fetch(fetchUrl, {
     method: 'GET',
-    headers: {
-      'client_id': config.clientId,
-      'sign': sign,
-      't': t,
-      'sign_method': 'HMAC-SHA256'
-    }
+    headers: reqHeaders
   });
 
   if (!response.ok) {
@@ -320,8 +345,7 @@ export const makeTuyaRequest = async (
   const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
 
   const region = config.region || 'eu';
-  const fetchUrl = constructFetchUrl(region, path);
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'client_id': config.clientId,
     'access_token': accessToken,
     'sign': sign,
@@ -332,6 +356,8 @@ export const makeTuyaRequest = async (
   if (body) {
     headers['Content-Type'] = 'application/json';
   }
+
+  const fetchUrl = constructFetchUrl(region, path, headers);
 
   const response = await fetch(fetchUrl, {
     method,
@@ -412,16 +438,17 @@ export const testFullConnection = async (config: TuyaConfig): Promise<{
       const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
       
       const region = config.region || 'eu';
-      const fetchUrl = constructFetchUrl(region, path);
+      const headers = {
+        'client_id': config.clientId,
+        'access_token': token,
+        'sign': sign,
+        't': t,
+        'sign_method': 'HMAC-SHA256'
+      };
+      const fetchUrl = constructFetchUrl(region, path, headers);
       const res = await fetch(fetchUrl, {
         method: 'GET',
-        headers: {
-          'client_id': config.clientId,
-          'access_token': token,
-          'sign': sign,
-          't': t,
-          'sign_method': 'HMAC-SHA256'
-        }
+        headers
       });
       return await res.json();
     };

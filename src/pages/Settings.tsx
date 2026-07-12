@@ -42,6 +42,7 @@ export const Settings: React.FC = () => {
   const [tempDeviceId1, setTempDeviceId1] = useState('');
   const [tempDeviceId2, setTempDeviceId2] = useState('');
   const [powerDeviceId, setPowerDeviceId] = useState('');
+  const [customProxyUrl, setCustomProxyUrl] = useState('');
 
   // Custom Device Names & Locations state
   const [tempName1, setTempName1] = useState('');
@@ -77,6 +78,7 @@ export const Settings: React.FC = () => {
         setTempDeviceId1(tuya.tempDeviceId1 || '');
         setTempDeviceId2(tuya.tempDeviceId2 || '');
         setPowerDeviceId(tuya.powerDeviceId || '');
+        setCustomProxyUrl(tuya.customProxyUrl || '');
 
         setTempName1(tuya.tempName1 || '');
         setTempLoc1(tuya.tempLoc1 || '');
@@ -110,6 +112,7 @@ export const Settings: React.FC = () => {
       tempDeviceId1: tempDeviceId1.trim(),
       tempDeviceId2: tempDeviceId2.trim(),
       powerDeviceId: powerDeviceId.trim(),
+      customProxyUrl: customProxyUrl.trim(),
       tempCode1: tempCode1.trim(),
       humCode1: humCode1.trim(),
       tempCode2: tempCode2.trim(),
@@ -157,6 +160,7 @@ export const Settings: React.FC = () => {
       tempDeviceId1: tempDeviceId1.trim(),
       tempDeviceId2: tempDeviceId2.trim(),
       powerDeviceId: powerDeviceId.trim(),
+      customProxyUrl: customProxyUrl.trim(),
       tempCode1: tempCode1.trim(),
       humCode1: humCode1.trim(),
       tempCode2: tempCode2.trim(),
@@ -273,6 +277,82 @@ export const Settings: React.FC = () => {
                     required
                     style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)' }}
                   />
+                </div>
+
+                <div className="input-group" style={{ border: '1px dashed var(--color-border)', padding: '16px', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.01)', marginTop: '8px' }}>
+                  <label htmlFor="custom-proxy" style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--color-primary)' }}>
+                    Custom CORS Proxy URL (Optional, but Recommended for Production)
+                  </label>
+                  <input 
+                    type="url" 
+                    id="custom-proxy"
+                    placeholder="https://your-proxy.your-username.workers.dev"
+                    value={customProxyUrl} 
+                    onChange={(e) => setCustomProxyUrl(e.target.value)} 
+                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px', marginBottom: '10px' }}
+                  />
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+                    <strong>Why use this?</strong> Public proxies (like corsproxy.io) strip headers with underscores (e.g. <code>client_id</code>), which causes the Tuya API to reject requests in production. Setting up a private Cloudflare Worker resolves this and ensures your credentials remain secure.
+                  </p>
+                  
+                  {/* Collapsible Cloudflare Worker Deployment Guide */}
+                  <details style={{ marginTop: '10px' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '11px', fontWeight: 600, color: 'var(--color-accent)', userSelect: 'none' }}>
+                      Show 2-Minute Setup Instructions
+                    </summary>
+                    <div style={{ marginTop: '10px', padding: '12px', borderRadius: '6px', backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid var(--color-border)', fontSize: '11px', color: 'var(--color-text)', lineHeight: '1.6' }}>
+                      <ol style={{ paddingLeft: '16px', margin: '0 0 12px 0' }}>
+                        <li>Sign up for a free account at <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}>dash.cloudflare.com</a>.</li>
+                        <li>Go to <strong>Workers & Pages</strong> &gt; <strong>Create Worker</strong>. Name it (e.g. <code>tuya-cors-proxy</code>).</li>
+                        <li>Click <strong>Deploy</strong>, then click <strong>Edit Code</strong>.</li>
+                        <li>Replace the default code with the script below, click <strong>Save and Deploy</strong>, and paste your Worker URL above!</li>
+                      </ol>
+                      <pre style={{ margin: 0, padding: '8px', borderRadius: '4px', backgroundColor: 'var(--color-hover-bg)', border: '1px solid var(--color-border)', overflowX: 'auto', fontSize: '10px', color: 'var(--color-accent)' }}>
+{`addEventListener('fetch', event => {
+  event.respondWith(handleRequest(event.request))
+})
+
+async function handleRequest(request) {
+  const url = new URL(request.url)
+  const targetUrl = url.searchParams.get('url')
+  if (!targetUrl) return new Response('Missing ?url= parameter', { status: 400 })
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Max-Age': '86400',
+      }
+    })
+  }
+
+  const forwardHeaders = new Headers()
+  for (const [key, value] of request.headers.entries()) {
+    if (key.toLowerCase() !== 'host' && key.toLowerCase() !== 'origin') {
+      forwardHeaders.set(key, value)
+    }
+  }
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: request.method,
+      headers: forwardHeaders,
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.arrayBuffer() : null
+    })
+    const responseHeaders = new Headers(response.headers)
+    responseHeaders.set('Access-Control-Allow-Origin', '*')
+    responseHeaders.set('Access-Control-Allow-Headers', '*')
+    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    return new Response(response.body, { status: response.status, headers: responseHeaders })
+  } catch (err) {
+    return new Response('Proxy Error: ' + err.message, { status: 500 })
+  }
+}`}
+                      </pre>
+                    </div>
+                  </details>
                 </div>
 
                 <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
