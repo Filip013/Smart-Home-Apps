@@ -287,10 +287,10 @@ export const PowerDetails: React.FC = () => {
       const hourlyList = historicalClimateDay?.sensors?.[selectedSensorKey]?.hourly || [];
       const temps = hourlyList.map((h: any) => h.temp).filter((t: any) => t !== null && t !== undefined && t !== 0.0);
       const hums = hourlyList.map((h: any) => h.humidity).filter((hu: any) => hu !== null && hu !== undefined && hu !== 0.0);
-      avgTemp = temps.length > 0 ? Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)) : 0;
+      avgTemp = temps.length > 0 ? Number((temps.reduce((a: number, b: number) => a + b, 0) / temps.length).toFixed(1)) : 0;
       minTemp = temps.length > 0 ? Math.min(...temps) : 0;
       maxTemp = temps.length > 0 ? Math.max(...temps) : 0;
-      avgHum = hums.length > 0 ? Math.round(hums.reduce((a, b) => a + b, 0) / hums.length) : 0;
+      avgHum = hums.length > 0 ? Math.round(hums.reduce((a: number, b: number) => a + b, 0) / hums.length) : 0;
       minHum = hums.length > 0 ? Math.min(...hums) : 0;
       maxHum = hums.length > 0 ? Math.max(...hums) : 0;
     }

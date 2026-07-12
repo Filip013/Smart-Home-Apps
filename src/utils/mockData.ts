@@ -27,6 +27,7 @@ export interface DailyPowerReading {
   kwh: number;
   peakKw: number;
   cost: number;
+  hourly?: number[];
 }
 
 export interface DevicePowerBreakdown {

@@ -124,7 +124,7 @@ export const getTuyaConfig = async (): Promise<TuyaConfig | null> => {
 // Query daily energy history from Firestore collection
 export const fetchFirestoreDailyPowerStats = async (
   userId: string
-): Promise<{ date: string; kwh: number; peakKw: number; cost: number }[]> => {
+): Promise<{ date: string; kwh: number; peakKw: number; cost: number; hourly?: number[] }[]> => {
   try {
     const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', userId, 'energyHistory');
     const querySnapshot = await getDocs(colRef);
@@ -139,7 +139,8 @@ export const fetchFirestoreDailyPowerStats = async (
         date: doc.id, // YYYY-MM-DD
         kwh,
         peakKw,
-        cost
+        cost,
+        hourly: data.hourly
       };
     }).sort((a, b) => a.date.localeCompare(b.date));
   } catch (error) {

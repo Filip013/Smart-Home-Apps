@@ -235,7 +235,7 @@ export const fetchRealPowerHistory = async (
 export const fetchRealDailyPowerStats = async (
   _deviceId: string,
   _energyCode: string
-): Promise<{ date: string; kwh: number; peakKw: number; cost: number }[]> => {
+): Promise<{ date: string; kwh: number; peakKw: number; cost: number; hourly?: number[] }[]> => {
   try {
     const user = auth.currentUser;
     if (!user) return [];

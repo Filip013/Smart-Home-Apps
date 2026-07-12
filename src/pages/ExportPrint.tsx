@@ -8,9 +8,7 @@ import {
   Printer, 
   Settings, 
   Zap,
-  AlertTriangle,
-  Thermometer,
-  Calendar
+  AlertTriangle
 } from 'lucide-react';
 
 export const ExportPrint: React.FC = () => {
