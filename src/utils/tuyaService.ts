@@ -36,9 +36,10 @@ export interface TuyaConfig {
 }
 
 // Helper to choose proxy prefix depending on environment (localhost proxy vs production CORS bypass)
-const getProxyPrefix = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in'): string => {
+// Helper to construct fetch URL depending on environment (localhost proxy vs production CORS bypass with URL encoding)
+const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: string): string => {
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return `/tuya-${region}`;
+    return `/tuya-${region}${path}`;
   }
   
   const domainMap: Record<string, string> = {
@@ -49,7 +50,7 @@ const getProxyPrefix = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in'): string =
     'in': 'openapi.tuyain.com'
   };
   const targetDomain = domainMap[region] || 'openapi.tuyaeu.com';
-  return `https://corsproxy.io/?https://${targetDomain}`;
+  return `https://corsproxy.io/?${encodeURIComponent(`https://${targetDomain}${path}`)}`;
 };
 
 // Hardcoded Firebase configuration provided by the user
@@ -242,9 +243,9 @@ export const getAccessToken = async (config: TuyaConfig): Promise<string> => {
   const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
 
   const region = config.region || 'eu';
-  const proxyPrefix = getProxyPrefix(region);
+  const fetchUrl = constructFetchUrl(region, path);
   
-  const response = await fetch(`${proxyPrefix}${path}`, {
+  const response = await fetch(fetchUrl, {
     method: 'GET',
     headers: {
       'client_id': config.clientId,
@@ -311,7 +312,7 @@ export const makeTuyaRequest = async (
   const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
 
   const region = config.region || 'eu';
-  const proxyPrefix = getProxyPrefix(region);
+  const fetchUrl = constructFetchUrl(region, path);
   const headers: HeadersInit = {
     'client_id': config.clientId,
     'access_token': accessToken,
@@ -324,7 +325,7 @@ export const makeTuyaRequest = async (
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(`${proxyPrefix}${path}`, {
+  const response = await fetch(fetchUrl, {
     method,
     headers,
     body: body ? bodyStr : undefined
@@ -403,8 +404,8 @@ export const testFullConnection = async (config: TuyaConfig): Promise<{
       const sign = (await hmacSha256(config.clientSecret, str)).toUpperCase();
       
       const region = config.region || 'eu';
-      const proxyPrefix = getProxyPrefix(region);
-      const res = await fetch(`${proxyPrefix}${path}`, {
+      const fetchUrl = constructFetchUrl(region, path);
+      const res = await fetch(fetchUrl, {
         method: 'GET',
         headers: {
           'client_id': config.clientId,
