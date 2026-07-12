@@ -37,7 +37,7 @@ const scaleHumidity = (val: any): number => {
 const scalePower = (val: any): number => {
   const num = Number(val);
   if (isNaN(num)) return 0;
-  return num > 10000 ? num / 10 : num;
+  return num / 10;
 };
 
 // Standardize Voltage scaling
@@ -310,7 +310,7 @@ export const fetchLivePowerMeter = async (
     const currStatus = status.find(s => s.code === iCode);
     const energyStatus = status.find(s => s.code === eCode);
 
-    const currentLoad = powerStatus ? Math.round(scalePower(powerStatus.value)) : 0;
+    const currentLoad = powerStatus ? Number(scalePower(powerStatus.value).toFixed(1)) : 0;
     const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
     const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
     const todayKwhRaw = energyStatus ? Number(energyStatus.value) || 0 : 0;
@@ -361,6 +361,49 @@ export const fetchLivePowerMeter = async (
       dailyHistory: [],
       breakdown: []
     };
+  }
+};
+
+export interface InstantPowerStats {
+  currentLoad: number;
+  voltage: number;
+  currentAmps: number;
+}
+
+// Fetch lightweight real-time stats (Active power, voltage, and current draw)
+export const fetchInstantPowerStats = async (
+  deviceId: string,
+  customCodes: { 
+    powerCode?: string; 
+    voltageCode?: string; 
+    currentCode?: string; 
+  }
+): Promise<InstantPowerStats | null> => {
+  if (!deviceId) return null;
+
+  const pCode = customCodes.powerCode || 'cur_power';
+  const vCode = customCodes.voltageCode || 'cur_voltage';
+  const iCode = customCodes.currentCode || 'cur_current';
+
+  try {
+    const status = await getDeviceStatus(deviceId);
+
+    const powerStatus = status.find(s => s.code === pCode);
+    const voltStatus = status.find(s => s.code === vCode);
+    const currStatus = status.find(s => s.code === iCode);
+
+    const currentLoad = powerStatus ? Number(scalePower(powerStatus.value).toFixed(1)) : 0;
+    const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
+    const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
+
+    return {
+      currentLoad,
+      voltage,
+      currentAmps
+    };
+  } catch (err) {
+    console.error("Error fetching instant power stats:", err);
+    return null;
   }
 };
 

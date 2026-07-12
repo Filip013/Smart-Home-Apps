@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData } from '../utils/deviceBridge';
+import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
+import { getTuyaConfig } from '../utils/tuyaService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
 import { 
@@ -52,6 +53,51 @@ export const Dashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [sensors.length, powerData]);
+
+  // Periodic real-time power meter stats sync (every 3 seconds when page is visible)
+  useEffect(() => {
+    if (!powerData || mode !== 'live') return;
+
+    const runSync = async () => {
+      // Skip if page is not visible to conserve API requests
+      if (document.hidden) return;
+      
+      try {
+        const config = await getTuyaConfig();
+        if (config && config.powerDeviceId) {
+          const instant = await fetchInstantPowerStats(config.powerDeviceId, {
+            powerCode: config.powerCode,
+            voltageCode: config.voltageCode,
+            currentCode: config.currentCode
+          });
+          if (instant) {
+            setPowerData(prev => prev ? {
+              ...prev,
+              currentLoad: instant.currentLoad,
+              voltage: instant.voltage,
+              currentAmps: instant.currentAmps
+            } : null);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching real-time power metrics:", err);
+      }
+    };
+
+    const interval = setInterval(runSync, 3000); // 3 seconds
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        runSync();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [powerData === null, mode]);
 
   if (loading) {
     return (
