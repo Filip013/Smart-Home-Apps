@@ -35,7 +35,6 @@ export interface TuyaConfig {
   powerLoc?: string;
 }
 
-// Helper to choose proxy prefix depending on environment (localhost proxy vs production CORS bypass)
 // Helper to construct fetch URL depending on environment (localhost proxy vs production CORS bypass with URL encoding and cache-busting)
 const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: string): string => {
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -50,8 +49,15 @@ const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: 
     'in': 'openapi.tuyain.com'
   };
   const targetDomain = domainMap[region] || 'openapi.tuyaeu.com';
-  // Enforce live data loading in production by appending a unique cache-buster parameter to the proxy wrapper
-  return `https://corsproxy.io/?${encodeURIComponent(`https://${targetDomain}${path}`)}&_cb=${Date.now()}`;
+  
+  // Separate basePath and queryString to keep base path unencoded (preventing 'uri path invalid' on proxies)
+  const [basePath, queryString] = path.split('?');
+  
+  if (queryString) {
+    return `https://corsproxy.io/?https://${targetDomain}${basePath}?${encodeURIComponent(queryString)}&_cb=${Date.now()}`;
+  }
+  
+  return `https://corsproxy.io/?https://${targetDomain}${basePath}&_cb=${Date.now()}`;
 };
 
 // Hardcoded Firebase configuration provided by the user
