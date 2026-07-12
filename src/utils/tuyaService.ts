@@ -36,7 +36,7 @@ export interface TuyaConfig {
 }
 
 // Simulation flag: set to true to force local dev server to use the production CORS proxy path
-const FORCE_PRODUCTION_PROXY = true;
+const FORCE_PRODUCTION_PROXY = false;
 
 // Helper to construct fetch URL depending on environment (localhost proxy vs production CORS bypass with URL encoding and cache-busting)
 const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: string): string => {
