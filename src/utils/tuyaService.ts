@@ -35,9 +35,12 @@ export interface TuyaConfig {
   powerLoc?: string;
 }
 
+// Simulation flag: set to true to force local dev server to use the production CORS proxy path
+const FORCE_PRODUCTION_PROXY = true;
+
 // Helper to construct fetch URL depending on environment (localhost proxy vs production CORS bypass with URL encoding and cache-busting)
 const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: string): string => {
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  if (!FORCE_PRODUCTION_PROXY && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     return `/tuya-${region}${path}`;
   }
   
@@ -49,15 +52,13 @@ const constructFetchUrl = (region: 'us' | 'eu' | 'eu-west' | 'cn' | 'in', path: 
     'in': 'openapi.tuyain.com'
   };
   const targetDomain = domainMap[region] || 'openapi.tuyaeu.com';
+  const targetUrl = `https://${targetDomain}${path}`;
   
-  // Separate basePath and queryString to keep base path unencoded (preventing 'uri path invalid' on proxies)
-  const [basePath, queryString] = path.split('?');
+  // Custom CORS preflight request headers allowed by corsproxy.io
+  const allowedHeaders = 'client_id,access_token,sign,t,sign_method,content-type';
   
-  if (queryString) {
-    return `https://corsproxy.io/?https://${targetDomain}${basePath}?${encodeURIComponent(queryString)}&_cb=${Date.now()}`;
-  }
-  
-  return `https://corsproxy.io/?https://${targetDomain}${basePath}&_cb=${Date.now()}`;
+  // recommended format: https://corsproxy.io/?url=TARGET_URL&resHeaders=...&_cb=Date.now()
+  return `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}&resHeaders=access-control-allow-headers:${encodeURIComponent(allowedHeaders)}&_cb=${Date.now()}`;
 };
 
 // Hardcoded Firebase configuration provided by the user
