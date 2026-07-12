@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData, fetchRealDailyClimateStats } from '../utils/deviceBridge';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { 
+  fetchAllDeviceData, 
+  fetchRealDailyClimateStats,
+  fetchRealDayPowerStats,
+  fetchRealDayClimateStats
+} from '../utils/deviceBridge';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -14,16 +19,40 @@ import {
   Thermometer
 } from 'lucide-react';
 
+const getLocalTodayDateStr = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+};
+
+const getLocalCurrentMonthStr = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+};
+
 export const PowerDetails: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeState = location.state as { sensor?: string; metric?: string } | null;
+
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [sensors, setSensors] = useState<TempSensor[]>([]);
   const [climateHistory, setClimateHistory] = useState<{ date: string; sensors: any }[]>([]);
   const [timeRange, setTimeRange] = useState<'24h' | '30d'>('24h');
-  const [selectedSensorKey, setSelectedSensorKey] = useState<string>('sensor1');
-  const [climateMetric, setClimateMetric] = useState<'temp' | 'humidity'>('temp');
+  const [selectedSensorKey, setSelectedSensorKey] = useState<string>(routeState?.sensor || 'sensor1');
+  const [climateMetric, setClimateMetric] = useState<'temp' | 'humidity'>(
+    routeState?.metric === 'humidity' ? 'humidity' : 'temp'
+  );
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [loading, setLoading] = useState(true);
+
+  // Calendar dates selection state
+  const [selectedDate, setSelectedDate] = useState(getLocalTodayDateStr());
+  const [selectedMonth, setSelectedMonth] = useState(getLocalCurrentMonthStr());
+
+  // Single past day details fetched from Firestore
+  const [historicalPowerDay, setHistoricalPowerDay] = useState<any | null>(null);
+  const [historicalClimateDay, setHistoricalClimateDay] = useState<any | null>(null);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -68,6 +97,79 @@ export const PowerDetails: React.FC = () => {
     loadData();
   }, []);
 
+  // Fetch past date stats from Firestore
+  useEffect(() => {
+    const loadDayHistory = async () => {
+      const today = getLocalTodayDateStr();
+      if (selectedDate === today) {
+        setHistoricalPowerDay(null);
+        setHistoricalClimateDay(null);
+        return;
+      }
+      
+      setHistoricalLoading(true);
+      try {
+        if (mode === 'live') {
+          const powerDay = await fetchRealDayPowerStats(selectedDate);
+          const climateDay = await fetchRealDayClimateStats(selectedDate);
+          setHistoricalPowerDay(powerDay);
+          setHistoricalClimateDay(climateDay);
+        } else {
+          // Generate mock single day history for demo mode
+          const mockHourlyPower = Array.from({ length: 24 }).map(() => Number((0.2 + Math.random() * 1.5).toFixed(3)));
+          setHistoricalPowerDay({
+            kwh: Number(mockHourlyPower.reduce((a, b) => a + b, 0).toFixed(1)),
+            peakKw: Number((Math.max(...mockHourlyPower) * 4).toFixed(1)),
+            cost: Number((mockHourlyPower.reduce((a, b) => a + b, 0) * 0.15).toFixed(2)),
+            hourly: mockHourlyPower
+          });
+
+          setHistoricalClimateDay({
+            date: selectedDate,
+            sensors: {
+              sensor1: {
+                avgTemp: 21.5,
+                minTemp: 19.5,
+                maxTemp: 23.5,
+                avgHumidity: 45,
+                hourly: Array.from({ length: 24 }).map((_, h) => {
+                  let temp = Number((20.0 + Math.sin((h - 6) / 24 * 2 * Math.PI) * 2.0 + Math.random() * 0.5).toFixed(1));
+                  let humidity = Math.round(45 - Math.sin((h - 6) / 24 * 2 * Math.PI) * 5 + Math.random() * 3);
+                  if (h === 3 || h === 4) {
+                    temp = 0.0;
+                    humidity = 0;
+                  }
+                  return { hour: h, temp, humidity };
+                })
+              },
+              sensor2: {
+                avgTemp: 27.2,
+                minTemp: 23.1,
+                maxTemp: 31.8,
+                avgHumidity: 74,
+                hourly: Array.from({ length: 24 }).map((_, h) => {
+                  let temp = Number((26.0 + Math.sin((h - 6) / 24 * 2 * Math.PI) * 4.0 + Math.random() * 1.0).toFixed(1));
+                  let humidity = Math.round(75 - Math.sin((h - 6) / 24 * 2 * Math.PI) * 8 + Math.random() * 5);
+                  if (h === 3 || h === 4) {
+                    temp = 0.0;
+                    humidity = 0;
+                  }
+                  return { hour: h, temp, humidity };
+                })
+              }
+            }
+          });
+        }
+      } catch (error) {
+        console.error("Error loading past day history:", error);
+      } finally {
+        setHistoricalLoading(false);
+      }
+    };
+
+    loadDayHistory();
+  }, [selectedDate, mode]);
+
   if (loading) {
     return (
       <div className="loading-screen">
@@ -89,12 +191,14 @@ export const PowerDetails: React.FC = () => {
     }
   };
 
-  // 1. Process Power History Chart Data
+  // 1. Process Power History Chart Data (Filtered by Selected Month for 30d view)
   const powerDailyData = powerData
-    ? powerData.dailyHistory.map(d => ({
-        ...d,
-        date: formatChartDate(d.date)
-      }))
+    ? powerData.dailyHistory
+        .filter(d => d.date.startsWith(selectedMonth))
+        .map(d => ({
+          ...d,
+          date: formatChartDate(d.date)
+        }))
     : [];
 
   // 2. Resolve Selected Climate Sensor
@@ -104,15 +208,17 @@ export const PowerDetails: React.FC = () => {
     return false;
   }) || (selectedSensorKey === 'sensor1' ? sensors[0] : sensors[1]);
 
-  // 3. Process Climate History Chart Data
-  const climateDailyData = climateHistory.map(entry => {
-    const sensorData = entry.sensors[selectedSensorKey] || {};
-    return {
-      date: formatChartDate(entry.date),
-      temp: sensorData.avgTemp !== undefined ? sensorData.avgTemp : 0,
-      humidity: sensorData.avgHumidity !== undefined ? sensorData.avgHumidity : 0
-    };
-  });
+  // 3. Process Climate History Chart Data (Filtered by Selected Month for 30d view)
+  const climateDailyData = climateHistory
+    .filter(entry => entry.date.startsWith(selectedMonth))
+    .map(entry => {
+      const sensorData = entry.sensors[selectedSensorKey] || {};
+      return {
+        date: formatChartDate(entry.date),
+        temp: sensorData.avgTemp !== undefined ? sensorData.avgTemp : 0,
+        humidity: sensorData.avgHumidity !== undefined ? sensorData.avgHumidity : 0
+      };
+    });
 
   // 4. Calculate Climate Stats (Averages / Min / Max)
   let avgTemp = 0;
@@ -122,20 +228,38 @@ export const PowerDetails: React.FC = () => {
   let minHum = 0;
   let maxHum = 0;
 
+  const today = getLocalTodayDateStr();
+
   if (timeRange === '24h') {
-    const temps = (selectedSensor?.history.map(h => h.temp) || []).filter(t => t !== 0.0);
-    const hums = (selectedSensor?.history.map(h => h.humidity) || []).filter(h => h !== 0.0);
-    avgTemp = temps.length > 0 ? Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)) : 0;
-    minTemp = temps.length > 0 ? Math.min(...temps) : 0;
-    maxTemp = temps.length > 0 ? Math.max(...temps) : 0;
-    avgHum = hums.length > 0 ? Math.round(hums.reduce((a, b) => a + b, 0) / hums.length) : 0;
-    minHum = hums.length > 0 ? Math.min(...hums) : 0;
-    maxHum = hums.length > 0 ? Math.max(...hums) : 0;
+    if (selectedDate === today) {
+      // Live Today Stats
+      const temps = (selectedSensor?.history.map(h => h.temp) || []).filter(t => t !== 0.0);
+      const hums = (selectedSensor?.history.map(h => h.humidity) || []).filter(h => h !== 0.0);
+      avgTemp = temps.length > 0 ? Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)) : 0;
+      minTemp = temps.length > 0 ? Math.min(...temps) : 0;
+      maxTemp = temps.length > 0 ? Math.max(...temps) : 0;
+      avgHum = hums.length > 0 ? Math.round(hums.reduce((a, b) => a + b, 0) / hums.length) : 0;
+      minHum = hums.length > 0 ? Math.min(...hums) : 0;
+      maxHum = hums.length > 0 ? Math.max(...hums) : 0;
+    } else {
+      // Historical Single Day Stats (Fetched from Firestore)
+      const hourlyList = historicalClimateDay?.sensors?.[selectedSensorKey]?.hourly || [];
+      const temps = hourlyList.map((h: any) => h.temp).filter((t: any) => t !== null && t !== undefined && t !== 0.0);
+      const hums = hourlyList.map((h: any) => h.humidity).filter((hu: any) => hu !== null && hu !== undefined && hu !== 0.0);
+      avgTemp = temps.length > 0 ? Number((temps.reduce((a, b) => a + b, 0) / temps.length).toFixed(1)) : 0;
+      minTemp = temps.length > 0 ? Math.min(...temps) : 0;
+      maxTemp = temps.length > 0 ? Math.max(...temps) : 0;
+      avgHum = hums.length > 0 ? Math.round(hums.reduce((a, b) => a + b, 0) / hums.length) : 0;
+      minHum = hums.length > 0 ? Math.min(...hums) : 0;
+      maxHum = hums.length > 0 ? Math.max(...hums) : 0;
+    }
   } else {
-    const dailyTemps = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgTemp).filter((t): t is number => t !== undefined && t !== 0.0);
-    const dailyMins = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.minTemp).filter((t): t is number => t !== undefined && t !== 0.0);
-    const dailyMaxs = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.maxTemp).filter((t): t is number => t !== undefined && t !== 0.0);
-    const dailyHums = climateHistory.map(entry => entry.sensors[selectedSensorKey]?.avgHumidity).filter((h): h is number => h !== undefined && h !== 0.0);
+    // 30-Day Calendar Month Stats
+    const filteredClimate = climateHistory.filter(entry => entry.date.startsWith(selectedMonth));
+    const dailyTemps = filteredClimate.map(entry => entry.sensors[selectedSensorKey]?.avgTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyMins = filteredClimate.map(entry => entry.sensors[selectedSensorKey]?.minTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyMaxs = filteredClimate.map(entry => entry.sensors[selectedSensorKey]?.maxTemp).filter((t): t is number => t !== undefined && t !== 0.0);
+    const dailyHums = filteredClimate.map(entry => entry.sensors[selectedSensorKey]?.avgHumidity).filter((h): h is number => h !== undefined && h !== 0.0);
 
     avgTemp = dailyTemps.length > 0 ? Number((dailyTemps.reduce((a, b) => a + b, 0) / dailyTemps.length).toFixed(1)) : 0;
     minTemp = dailyMins.length > 0 ? Math.min(...dailyMins) : 0;
@@ -150,6 +274,23 @@ export const PowerDetails: React.FC = () => {
   const avgLoad24h = powerData && powerData.hourlyHistory.length > 0
     ? Math.round(powerData.hourlyHistory.reduce((acc, h) => acc + h.loadWatts, 0) / powerData.hourlyHistory.length)
     : 0;
+
+  // 5. Map Single Day Historical Chart Arrays
+  const historicalHourlyPowerData = historicalPowerDay?.hourly
+    ? historicalPowerDay.hourly.map((kwh: number, hour: number) => ({
+        time: `${hour.toString().padStart(2, '0')}:00`,
+        kwh
+      }))
+    : [];
+
+  const historicalHourlyClimateData = historicalClimateDay?.sensors?.[selectedSensorKey]?.hourly
+    ? historicalClimateDay.sensors[selectedSensorKey].hourly
+        .map((item: any) => ({
+          time: `${item.hour.toString().padStart(2, '0')}:00`,
+          temp: item.temp,
+          humidity: item.humidity
+        }))
+    : [];
 
   return (
     <div className="power-details-view animate-fade-in">
@@ -171,28 +312,71 @@ export const PowerDetails: React.FC = () => {
       )}
 
       {/* Title Header */}
-      <section className="page-header" aria-label="Page Title">
+      <section className="page-header" aria-label="Page Title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div className="title-group">
           <h2>Power & Climate Analytics</h2>
           <p>Detailed insight into your grid connection, energy consumption, and environmental climate history.</p>
         </div>
-        <div className="tab-control glass">
-          <button 
-            id="tab-range-24h"
-            className={`tab-btn ${timeRange === '24h' ? 'active' : ''}`}
-            onClick={() => setTimeRange('24h')}
-          >
-            <Clock size={14} />
-            <span>24h Profile</span>
-          </button>
-          <button 
-            id="tab-range-30d"
-            className={`tab-btn ${timeRange === '30d' ? 'active' : ''}`}
-            onClick={() => setTimeRange('30d')}
-          >
-            <Calendar size={14} />
-            <span>30-Day History</span>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          {/* Calendar Picker Selector */}
+          {timeRange === '24h' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Select Day:</span>
+              <input 
+                type="date" 
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                max={getLocalTodayDateStr()}
+                style={{ 
+                  padding: '6px 12px', 
+                  borderRadius: '6px', 
+                  border: '1px solid var(--color-border)', 
+                  backgroundColor: 'var(--color-card-bg)', 
+                  color: 'var(--color-text)',
+                  fontSize: '13px',
+                  fontWeight: 600
+                }}
+              />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Select Month:</span>
+              <input 
+                type="month" 
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                max={getLocalCurrentMonthStr()}
+                style={{ 
+                  padding: '6px 12px', 
+                  borderRadius: '6px', 
+                  border: '1px solid var(--color-border)', 
+                  backgroundColor: 'var(--color-card-bg)', 
+                  color: 'var(--color-text)',
+                  fontSize: '13px',
+                  fontWeight: 600
+                }}
+              />
+            </div>
+          )}
+
+          <div className="tab-control glass">
+            <button 
+              id="tab-range-24h"
+              className={`tab-btn ${timeRange === '24h' ? 'active' : ''}`}
+              onClick={() => setTimeRange('24h')}
+            >
+              <Clock size={14} />
+              <span>24h Profile</span>
+            </button>
+            <button 
+              id="tab-range-30d"
+              className={`tab-btn ${timeRange === '30d' ? 'active' : ''}`}
+              onClick={() => setTimeRange('30d')}
+            >
+              <Calendar size={14} />
+              <span>30-Day History</span>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -252,22 +436,42 @@ export const PowerDetails: React.FC = () => {
             <div className="card-title-group">
               <Activity className="card-icon text-accent" />
               <h3 id="consumption-chart-title">
-                {timeRange === '24h' ? '24-Hour Load Curve (Active Power)' : '30-Day Energy Consumption (kWh)'}
+                {timeRange === '24h' 
+                  ? (selectedDate === today ? '24-Hour Load Curve (Active Power)' : `Hourly Power Profile: ${formatChartDate(selectedDate)}`)
+                  : `Monthly Power Consumption: ${selectedMonth}`}
               </h3>
             </div>
           </div>
           <div className="chart-main-body">
-            {timeRange === '24h' ? (
-              <LineAreaChart 
-                data={powerData.hourlyHistory} 
-                xKey="time" 
-                yKey="loadWatts"
-                yLabel="Active Load"
-                color="var(--color-accent)"
-                fillColor="url(#gradient-cyan)"
-                height={260}
-                valueSuffix=" W"
-              />
+            {historicalLoading ? (
+              <div style={{ height: '260px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+                <Zap className="animate-spin text-accent" size={32} style={{ marginBottom: '12px' }} />
+                <span>Fetching archive from Firestore...</span>
+              </div>
+            ) : timeRange === '24h' ? (
+              selectedDate === today ? (
+                <LineAreaChart 
+                  data={powerData.hourlyHistory} 
+                  xKey="time" 
+                  yKey="loadWatts"
+                  yLabel="Active Load"
+                  color="var(--color-accent)"
+                  fillColor="url(#gradient-cyan)"
+                  height={260}
+                  valueSuffix=" W"
+                />
+              ) : (
+                <LineAreaChart 
+                  data={historicalHourlyPowerData} 
+                  xKey="time" 
+                  yKey="kwh"
+                  yLabel="Hourly Energy"
+                  color="var(--color-primary)"
+                  fillColor="url(#gradient-indigo)"
+                  height={260}
+                  valueSuffix=" kWh"
+                />
+              )
             ) : (
               <BarChart 
                 data={powerDailyData} 
@@ -285,20 +489,32 @@ export const PowerDetails: React.FC = () => {
               <span className="summary-stat-label">Peak Demand</span>
               <span className="summary-stat-val text-danger">
                 {timeRange === '24h' 
-                  ? `${(peakLoad24h / 1000).toFixed(2)} kW` 
-                  : `${Math.max(...powerData.dailyHistory.map(d => d.peakKw), 0)} kW`}
+                  ? (selectedDate === today 
+                      ? `${(peakLoad24h / 1000).toFixed(2)} kW` 
+                      : `${historicalPowerDay?.peakKw || 0} kW`)
+                  : `${Math.max(...powerDailyData.map(d => d.peakKw), 0)} kW`}
               </span>
             </div>
             <div className="summary-stat-item">
-              <span className="summary-stat-label">Average Load</span>
+              <span className="summary-stat-label">
+                {timeRange === '24h' ? (selectedDate === today ? 'Average Load' : 'Total Energy') : 'Average Load'}
+              </span>
               <span className="summary-stat-val">
-                {timeRange === '24h' ? `${avgLoad24h} W` : `${(powerData.monthKwh / 30).toFixed(1)} kWh/day`}
+                {timeRange === '24h' 
+                  ? (selectedDate === today 
+                      ? `${avgLoad24h} W` 
+                      : `${historicalPowerDay?.kwh || 0} kWh`)
+                  : `${(powerDailyData.reduce((acc, d) => acc + d.kwh, 0) / Math.max(1, powerDailyData.length)).toFixed(1)} kWh/day`}
               </span>
             </div>
             <div className="summary-stat-item">
-              <span className="summary-stat-label">Total Cost</span>
+              <span className="summary-stat-label">Estimated Cost</span>
               <span className="summary-stat-val text-warning">
-                {timeRange === '24h' ? `$${(powerData.todayKwh * 0.15).toFixed(2)} (Today)` : `$${powerData.estMonthlyCost.toFixed(2)}`}
+                {timeRange === '24h' 
+                  ? (selectedDate === today 
+                      ? `$${(powerData.todayKwh * 0.15).toFixed(2)}` 
+                      : `$${(historicalPowerDay?.cost || 0).toFixed(2)}`)
+                  : `$${powerDailyData.reduce((acc, d) => acc + d.cost, 0).toFixed(2)}`}
               </span>
             </div>
           </div>
@@ -324,8 +540,10 @@ export const PowerDetails: React.FC = () => {
             <Thermometer className="card-icon text-primary" />
             <h3 id="climate-history-title">
               {timeRange === '24h' 
-                ? `24-Hour Climate Profile: ${selectedSensor?.name || 'Sensor'}`
-                : `30-Day Climate History: ${selectedSensor?.name || 'Sensor'}`}
+                ? (selectedDate === today 
+                    ? `24-Hour Climate Profile: ${selectedSensor?.name || 'Sensor'}` 
+                    : `Hourly Climate Profile: ${selectedSensor?.name || 'Sensor'} (${formatChartDate(selectedDate)})`)
+                : `Monthly Climate History: ${selectedSensor?.name || 'Sensor'} (${selectedMonth})`}
             </h3>
           </div>
           
@@ -374,17 +592,35 @@ export const PowerDetails: React.FC = () => {
         </div>
 
         <div className="chart-main-body">
-          {timeRange === '24h' ? (
-            <LineAreaChart 
-              data={selectedSensor?.history || []} 
-              xKey="time" 
-              yKey={climateMetric}
-              yLabel={climateMetric === 'temp' ? 'Temp' : 'Humidity'}
-              color={climateMetric === 'temp' ? 'var(--color-primary)' : 'var(--color-secondary)'}
-              fillColor={climateMetric === 'temp' ? 'url(#gradient-indigo)' : 'url(#gradient-emerald)'}
-              height={260}
-              valueSuffix={climateMetric === 'temp' ? '°C' : '%'}
-            />
+          {historicalLoading ? (
+            <div style={{ height: '260px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+              <Zap className="animate-spin text-accent" size={32} style={{ marginBottom: '12px' }} />
+              <span>Fetching archive from Firestore...</span>
+            </div>
+          ) : timeRange === '24h' ? (
+            selectedDate === today ? (
+              <LineAreaChart 
+                data={selectedSensor?.history || []} 
+                xKey="time" 
+                yKey={climateMetric}
+                yLabel={climateMetric === 'temp' ? 'Temp' : 'Humidity'}
+                color={climateMetric === 'temp' ? 'var(--color-primary)' : 'var(--color-secondary)'}
+                fillColor={climateMetric === 'temp' ? 'url(#gradient-indigo)' : 'url(#gradient-emerald)'}
+                height={260}
+                valueSuffix={climateMetric === 'temp' ? '°C' : '%'}
+              />
+            ) : (
+              <LineAreaChart 
+                data={historicalHourlyClimateData} 
+                xKey="time" 
+                yKey={climateMetric}
+                yLabel={climateMetric === 'temp' ? 'Temp' : 'Humidity'}
+                color={climateMetric === 'temp' ? 'var(--color-primary)' : 'var(--color-secondary)'}
+                fillColor={climateMetric === 'temp' ? 'url(#gradient-indigo)' : 'url(#gradient-emerald)'}
+                height={260}
+                valueSuffix={climateMetric === 'temp' ? '°C' : '%'}
+              />
+            )
           ) : (
             <LineAreaChart 
               data={climateDailyData} 

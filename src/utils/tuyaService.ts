@@ -169,6 +169,52 @@ export const fetchFirestoreDailyClimateStats = async (
   }
 };
 
+// Query hourly energy statistics for a single day from Firestore
+export const fetchFirestoreDayPowerStats = async (
+  userId: string,
+  date: string
+): Promise<any | null> => {
+  try {
+    const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', userId, 'energyHistory', date);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        kwh: Number(data.kwh) || 0,
+        peakKw: data.peakKw !== undefined ? Number(data.peakKw) : 0,
+        cost: data.cost !== undefined ? Number(data.cost) : 0,
+        hourly: data.hourly || []
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching single day power stats from Firestore:", error);
+    return null;
+  }
+};
+
+// Query hourly climate statistics for a single day from Firestore
+export const fetchFirestoreDayClimateStats = async (
+  userId: string,
+  date: string
+): Promise<any | null> => {
+  try {
+    const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', userId, 'climateHistory', date);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        date: docSnap.id,
+        sensors: data.sensors || {}
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching single day climate stats from Firestore:", error);
+    return null;
+  }
+};
+
 // Constant for SHA-256 of empty string
 const EMPTY_BODY_SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 

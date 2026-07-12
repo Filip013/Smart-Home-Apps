@@ -1,4 +1,4 @@
-import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats } from './tuyaService';
+import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats, fetchFirestoreDayPowerStats, fetchFirestoreDayClimateStats } from './tuyaService';
 import type { TempSensor, PowerMeter, TempReading } from './mockData';
 
 
@@ -255,6 +255,30 @@ export const fetchRealDailyClimateStats = async (): Promise<{ date: string; sens
   } catch (error) {
     console.error("Error loading daily climate stats from Firestore:", error);
     return [];
+  }
+};
+
+// Fetch single day power stats from Firestore
+export const fetchRealDayPowerStats = async (date: string): Promise<any | null> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) return null;
+    return await fetchFirestoreDayPowerStats(user.uid, date);
+  } catch (error) {
+    console.error("Error loading single day power stats:", error);
+    return null;
+  }
+};
+
+// Fetch single day climate stats from Firestore
+export const fetchRealDayClimateStats = async (date: string): Promise<any | null> => {
+  try {
+    const user = auth.currentUser;
+    if (!user) return null;
+    return await fetchFirestoreDayClimateStats(user.uid, date);
+  } catch (error) {
+    console.error("Error loading single day climate stats:", error);
+    return null;
   }
 };
 
