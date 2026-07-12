@@ -1,28 +1,50 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData } from '../utils/deviceBridge';
+import { fetchAllDeviceData, fetchRealDailyClimateStats } from '../utils/deviceBridge';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
+import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
   FileDown, 
   Printer, 
   Settings, 
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  Thermometer,
+  Calendar
 } from 'lucide-react';
 
 export const ExportPrint: React.FC = () => {
   const navigate = useNavigate();
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [sensors, setSensors] = useState<TempSensor[]>([]);
+  const [climateHistory, setClimateHistory] = useState<{ date: string; sensors: any }[]>([]);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [loading, setLoading] = useState(true);
-  
-  // Print configuration state
-  const [includeKpis, setIncludeKpis] = useState(true);
-  const [includeCharts, setIncludeCharts] = useState(true);
-  const [includeBreakdown, setIncludeBreakdown] = useState(true);
-  const [includeTable, setIncludeTable] = useState(true);
-  const [includeClimate, setIncludeClimate] = useState(true);
+
+  const getLocalCurrentMonthStr = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
+  };
+
+  const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
+    if (hourlyKwh && hourlyKwh.length === 24) {
+      let cost = 0;
+      hourlyKwh.forEach((val, hour) => {
+        if (hour >= 0 && hour < 8) {
+          cost += val * 4.15;
+        } else {
+          cost += val * 13.45;
+        }
+      });
+      return cost;
+    }
+    // Default weighted average estimation: 70% Day (13.45), 30% Night (4.15) -> 10.66 RSD/kWh
+    return kwh * 10.66;
+  };
+
+  const [selectedMonth, setSelectedMonth] = useState(getLocalCurrentMonthStr());
+  const [selectedSensorKey, setSelectedSensorKey] = useState<string>('sensor1');
+  const [climateMetric, setClimateMetric] = useState<'temp' | 'humidity'>('temp');
 
   useEffect(() => {
     const loadData = async () => {
@@ -31,11 +53,32 @@ export const ExportPrint: React.FC = () => {
       setPowerData(data.power);
       setSensors(data.sensors);
       setMode(data.mode);
-      if (!data.power) {
-        setIncludeKpis(false);
-        setIncludeCharts(false);
-        setIncludeBreakdown(false);
-        setIncludeTable(false);
+
+      if (data.mode === 'live') {
+        const history = await fetchRealDailyClimateStats();
+        setClimateHistory(history);
+      } else {
+        // Generate 90 days of mock climate history for demo mode
+        const mockHistory = [];
+        const now = new Date();
+        for (let i = 89; i >= 0; i--) {
+          const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+          const dateStr = d.toISOString().split('T')[0];
+          mockHistory.push({
+            date: dateStr,
+            sensors: {
+              sensor1: {
+                avgTemp: Number((21.0 + Math.random() * 2.0).toFixed(1)),
+                avgHumidity: Math.round(40 + Math.random() * 10)
+              },
+              sensor2: {
+                avgTemp: Number((26.0 + Math.random() * 4.0).toFixed(1)),
+                avgHumidity: Math.round(70 + Math.random() * 15)
+              }
+            }
+          });
+        }
+        setClimateHistory(mockHistory);
       }
       setLoading(false);
     };
@@ -51,71 +94,130 @@ export const ExportPrint: React.FC = () => {
     );
   }
 
-  // Setup Required View: if no devices are configured at all
-  if (sensors.length === 0 && !powerData) {
-    return (
-      <div className="settings-view animate-fade-in" style={{ padding: '80px 24px 40px 24px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
-        <section className="dashboard-card glass" style={{ padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
-          <div style={{ width: '56px', height: '56px', borderRadius: '50%', backgroundColor: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <FileDown className="text-primary" size={28} />
-          </div>
-          <div>
-            <h3 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>No Data Available for Export</h3>
-            <p style={{ fontSize: '14px', color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
-              AetherSmart requires at least one active climate sensor or grid power meter configuration in the Settings tab to generate PDF print layouts or download CSV spreadsheets.
-            </p>
-          </div>
-          <button 
-            id="btn-goto-settings-export"
-            onClick={() => navigate('/settings')} 
-            className="btn primary" 
-            style={{ padding: '10px 24px', fontWeight: 600 }}
-          >
-            Go to Settings
-          </button>
-        </section>
-      </div>
-    );
+  // Formatting dates helper
+  const formatChartDate = (dateStr: string) => {
+    if (!dateStr.includes('-')) return dateStr;
+    try {
+      const [, , day] = dateStr.split('-');
+      return day; // Just show day of the month (e.g. "12") for monthly view X axis
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const powerDailyData = powerData
+    ? powerData.dailyHistory
+        .filter(d => d.date.startsWith(selectedMonth))
+        .map(d => ({
+          ...d,
+          date: formatChartDate(d.date)
+        }))
+    : [];
+
+  const climateDailyData = climateHistory
+    .filter(entry => entry.date.startsWith(selectedMonth))
+    .map(entry => {
+      const sensorData = entry.sensors[selectedSensorKey] || {};
+      return {
+        date: formatChartDate(entry.date),
+        temp: sensorData.avgTemp !== undefined ? sensorData.avgTemp : 0,
+        humidity: sensorData.avgHumidity !== undefined ? sensorData.avgHumidity : 0
+      };
+    });
+
+  // Merged Daily Report Table Data
+  const datesSet = new Set<string>();
+  if (powerData) {
+    powerData.dailyHistory.forEach(d => {
+      if (d.date.startsWith(selectedMonth)) datesSet.add(d.date);
+    });
   }
+  climateHistory.forEach(c => {
+    if (c.date.startsWith(selectedMonth)) datesSet.add(c.date);
+  });
+  const sortedDates = Array.from(datesSet).sort();
 
-  // Generate and download CSV
-  const handleExportCSV = (type: 'hourly' | 'daily') => {
-    if (!powerData) {
-      alert("No power meter configuration available to export.");
-      return;
-    }
+  const reportTableData = sortedDates.map(date => {
+    const pEntry = powerData?.dailyHistory.find(d => d.date === date);
+    const cEntry = climateHistory.find(c => c.date === date);
+    const sensorData = cEntry?.sensors?.[selectedSensorKey] || {};
+    const kwh = pEntry?.kwh !== undefined ? pEntry.kwh : null;
+    const cost = pEntry !== undefined 
+      ? calculateDailyCostRSD(pEntry.kwh, pEntry.hourly)
+      : null;
+    return {
+      date,
+      kwh,
+      cost,
+      temp: sensorData.avgTemp !== undefined ? sensorData.avgTemp : null,
+      humidity: sensorData.avgHumidity !== undefined ? sensorData.avgHumidity : null
+    };
+  });
 
-    let headers: string[] = [];
-    let rows: string[][] = [];
-    let filename = '';
+  const totalMonthlyKwh = reportTableData.reduce((acc, d) => acc + (d.kwh || 0), 0);
+  const totalMonthlyCostRSD = reportTableData.reduce((acc, d) => acc + (d.cost || 0), 0);
 
-    if (type === 'hourly') {
-      filename = `power_meter_hourly_${new Date().toISOString().split('T')[0]}.csv`;
-      headers = ['Timestamp', 'Load (Watts)', 'Grid Voltage (Volts)', 'Current Draw (Amps)'];
-      rows = powerData.hourlyHistory.map(h => [
-        h.time,
-        String(h.loadWatts),
-        String(h.voltage),
-        String(h.currentAmps)
-      ]);
-    } else {
-      filename = `power_meter_daily_${new Date().toISOString().split('T')[0]}.csv`;
-      headers = ['Date', 'Energy Consumed (kWh)', 'Peak Demand (kW)', 'Cost ($)'];
-      rows = powerData.dailyHistory.map(d => [
-        d.date,
-        String(d.kwh),
-        String(d.peakKw),
-        String(d.cost)
-      ]);
-    }
+  const handleExportCSV = () => {
+    const filename = `smart_home_report_${selectedMonth}.csv`;
+    const headers = ['Date', 'Energy Consumed (kWh)', 'Est Cost (RSD)', 'Average Temp (°C)', 'Average Humidity (%)'];
+    const rows = reportTableData.map(d => [
+      d.date,
+      d.kwh !== null ? String(d.kwh) : 'N/A',
+      d.cost !== null ? d.cost.toFixed(2) : 'N/A',
+      d.temp !== null ? String(d.temp) : 'N/A',
+      d.humidity !== null ? String(d.humidity) : 'N/A'
+    ]);
 
-    // Combine headers and rows
     const csvContent = [
       headers.join(','),
       ...rows.map(r => r.map(val => `"${val.replace(/"/g, '""')}"`).join(','))
     ].join('\n');
 
-    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportFullHistoryCSV = () => {
+    const filename = `smart_home_full_history_${new Date().toISOString().split('T')[0]}.csv`;
+    const headers = ['Date', 'Energy Consumed (kWh)', 'Est Cost (RSD)', 'Average Temp (°C)', 'Average Humidity (%)'];
+    
+    // Collect all unique dates in the history
+    const allDatesSet = new Set<string>();
+    if (powerData) {
+      powerData.dailyHistory.forEach(d => allDatesSet.add(d.date));
+    }
+    climateHistory.forEach(c => allDatesSet.add(c.date));
+    const sortedAllDates = Array.from(allDatesSet).sort();
+
+    const rows = sortedAllDates.map(date => {
+      const pEntry = powerData?.dailyHistory.find(d => d.date === date);
+      const cEntry = climateHistory.find(c => c.date === date);
+      const sensorData = cEntry?.sensors?.[selectedSensorKey] || {};
+      const kwh = pEntry?.kwh !== undefined ? pEntry.kwh : null;
+      const cost = pEntry !== undefined 
+        ? calculateDailyCostRSD(pEntry.kwh, pEntry.hourly)
+        : null;
+      return [
+        date,
+        kwh !== null ? String(kwh) : 'N/A',
+        cost !== null ? cost.toFixed(2) : 'N/A',
+        sensorData.avgTemp !== undefined ? String(sensorData.avgTemp) : 'N/A',
+        sensorData.avgHumidity !== undefined ? String(sensorData.avgHumidity) : 'N/A'
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.map(val => `"${val.replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -137,7 +239,7 @@ export const ExportPrint: React.FC = () => {
         <div className="alert-banner warning print-hide" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <AlertTriangle size={18} />
-            <span><strong>Demo Mode:</strong> Exporting simulated reports. Configure your credentials in Settings to sync your real devices.</span>
+            <span><strong>Demo Mode:</strong> Exporting simulated reports. Configure credentials in Settings to sync Firestore.</span>
           </div>
           <button 
             id="goto-settings-btn"
@@ -149,289 +251,252 @@ export const ExportPrint: React.FC = () => {
           </button>
         </div>
       )}
+
       {/* Page Header */}
       <section className="page-header print-hide" aria-label="Page Title">
         <div className="title-group">
           <h2>Data Export & Print Services</h2>
-          <p>Download climate and power readings in spreadsheet format or generate ink-friendly printable PDFs.</p>
+          <p>Export historical archives to CSV spreadsheets or print clean reports containing charts and consolidated logs.</p>
         </div>
       </section>
 
       {/* Main Grid split: settings & preview */}
-      <div className="export-grid">
+      <div className="export-grid" style={{ display: 'grid', gridTemplateColumns: '320px 1f', gap: '24px', alignItems: 'start' }}>
         
         {/* Settings Panel (Hidden during printing) */}
-        <section className="dashboard-card settings-card glass print-hide" aria-labelledby="settings-title">
-          <div className="card-header">
+        <section className="dashboard-card settings-card glass print-hide" aria-labelledby="settings-title" style={{ padding: '20px' }}>
+          <div className="card-header" style={{ marginBottom: '16px' }}>
             <div className="card-title-group">
               <Settings className="card-icon text-primary" />
-              <h3 id="settings-title">Export Settings</h3>
+              <h3 id="settings-title">Configure Report</h3>
             </div>
           </div>
           
-           <div className="settings-body">
-            {/* CSV Exporter */}
-            {powerData && (
-              <div className="settings-section">
-                <h4>Download CSV Spreadsheets</h4>
-                <p className="section-description">Export raw timeseries log records for local storage or analysis in Excel.</p>
-                <div className="btn-group-vertical">
-                  <button 
-                    id="export-hourly-csv-btn"
-                    onClick={() => handleExportCSV('hourly')} 
-                    className="btn primary"
-                  >
-                    <FileDown size={16} />
-                    <span>Download Hourly Load Log (24h)</span>
-                  </button>
-                  <button 
-                    id="export-daily-csv-btn"
-                    onClick={() => handleExportCSV('daily')} 
-                    className="btn secondary"
-                  >
-                    <FileDown size={16} />
-                    <span>Download Daily Energy Log (30d)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Print configurator */}
+          <div className="settings-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="settings-section">
-              <h4>Configure Printable PDF Report</h4>
-              <p className="section-description">Choose the components to include in the generated paper printout layout.</p>
-              
-              <div className="checkbox-list">
-                {powerData && (
-                  <>
-                    <label className="checkbox-label" htmlFor="chk-kpis">
-                      <input 
-                        type="checkbox" 
-                        id="chk-kpis"
-                        checked={includeKpis} 
-                        onChange={(e) => setIncludeKpis(e.target.checked)} 
-                      />
-                      <span className="checkbox-custom"></span>
-                      <span>Energy Summary Metrics (KPIs)</span>
-                    </label>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>Select Calendar Month:</label>
+              <input 
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                max={getLocalCurrentMonthStr()}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  backgroundColor: 'var(--color-card-bg)',
+                  color: 'var(--color-text)',
+                  fontSize: '14px',
+                  fontWeight: 600
+                }}
+              />
+            </div>
 
-                    <label className="checkbox-label" htmlFor="chk-charts">
-                      <input 
-                        type="checkbox" 
-                        id="chk-charts"
-                        checked={includeCharts} 
-                        onChange={(e) => setIncludeCharts(e.target.checked)} 
-                      />
-                      <span className="checkbox-custom"></span>
-                      <span>Power Load Curve Chart</span>
-                    </label>
+            <div className="settings-section">
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>Climate Sensor Source:</label>
+              <select
+                value={selectedSensorKey}
+                onChange={(e) => setSelectedSensorKey(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--color-border)',
+                  backgroundColor: 'var(--color-card-bg)',
+                  color: 'var(--color-text)',
+                  fontSize: '14px',
+                  fontWeight: 600
+                }}
+              >
+                <option value="sensor1">{sensors[0]?.name || 'Living Room Sensor'}</option>
+                <option value="sensor2">{sensors[1]?.name || 'Greenhouse Sensor'}</option>
+              </select>
+            </div>
 
-                    <label className="checkbox-label" htmlFor="chk-breakdown">
-                      <input 
-                        type="checkbox" 
-                        id="chk-breakdown"
-                        checked={includeBreakdown} 
-                        onChange={(e) => setIncludeBreakdown(e.target.checked)} 
-                      />
-                      <span className="checkbox-custom"></span>
-                      <span>Appliance Power Share breakdown</span>
-                    </label>
-
-                    <label className="checkbox-label" htmlFor="chk-table">
-                      <input 
-                        type="checkbox" 
-                        id="chk-table"
-                        checked={includeTable} 
-                        onChange={(e) => setIncludeTable(e.target.checked)} 
-                      />
-                      <span className="checkbox-custom"></span>
-                      <span>Historical Daily Consumption Table</span>
-                    </label>
-                  </>
-                )}
-
-                <label className="checkbox-label" htmlFor="chk-climate">
-                  <input 
-                    type="checkbox" 
-                    id="chk-climate"
-                    checked={includeClimate} 
-                    onChange={(e) => setIncludeClimate(e.target.checked)} 
-                  />
-                  <span className="checkbox-custom"></span>
-                  <span>Climate Sensors Summary</span>
-                </label>
+            <div className="settings-section">
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>Report Climate Metric:</label>
+              <div className="tab-control glass" style={{ width: '100%', padding: '2px', display: 'flex' }}>
+                <button 
+                  className={`tab-btn ${climateMetric === 'temp' ? 'active' : ''}`}
+                  onClick={() => setClimateMetric('temp')}
+                  style={{ flex: 1, padding: '6px', fontSize: '12px' }}
+                >
+                  Temp (°C)
+                </button>
+                <button 
+                  className={`tab-btn ${climateMetric === 'humidity' ? 'active' : ''}`}
+                  onClick={() => setClimateMetric('humidity')}
+                  style={{ flex: 1, padding: '6px', fontSize: '12px' }}
+                >
+                  Humidity (%)
+                </button>
               </div>
+            </div>
+
+            <hr style={{ border: '0', borderTop: '1px solid var(--color-border)', margin: '4px 0' }} />
+
+            <div className="settings-section" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <button 
+                id="export-month-csv-btn"
+                onClick={handleExportCSV} 
+                className="btn primary w-full"
+                style={{ justifyContent: 'center', gap: '8px', padding: '10px' }}
+              >
+                <FileDown size={16} />
+                <span>Export Selected Month CSV</span>
+              </button>
+
+              <button 
+                id="export-full-csv-btn"
+                onClick={handleExportFullHistoryCSV} 
+                className="btn secondary w-full"
+                style={{ justifyContent: 'center', gap: '8px', padding: '10px' }}
+              >
+                <FileDown size={16} />
+                <span>Export Full 3-Month CSV</span>
+              </button>
 
               <button 
                 id="trigger-print-btn"
                 onClick={handlePrint} 
-                className="btn accent w-full mt-4"
+                className="btn accent w-full"
+                style={{ justifyContent: 'center', gap: '8px', padding: '10px', marginTop: '4px' }}
               >
                 <Printer size={16} />
-                <span>Print or Save to PDF</span>
+                <span>Print or Save PDF Report</span>
               </button>
             </div>
           </div>
         </section>
 
         {/* Live Print Preview Sheet */}
-        <section className="print-preview-container" aria-label="Print Preview Sheet">
-          <div className="preview-header-bar print-hide">
-            <span className="preview-badge">Live Print Preview</span>
-            <span className="preview-hint">This matches the output layout on physical paper.</span>
+        <section className="print-preview-container" aria-label="Print Preview Sheet" style={{ flex: 1 }}>
+          <div className="preview-header-bar print-hide" style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="preview-badge" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>Report Preview</span>
+            <span className="preview-hint" style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>This preview shows exactly what will be printed.</span>
           </div>
 
-          <div className="printable-sheet glass">
+          <div className="printable-sheet glass" style={{ padding: '30px', backgroundColor: 'var(--color-card-bg)', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
             {/* Print Header */}
-            <div className="print-report-header">
-              <div className="print-logo-row">
-                <div className="print-logo-box">⚡</div>
-                <div>
-                  <h2>AETHER-SMART HOME SUMMARY REPORT</h2>
-                  <p>Smart Energy Monitor & Climate Diagnostics</p>
-                </div>
+            <div className="print-report-header" style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid var(--color-border)', paddingBottom: '20px', marginBottom: '24px' }}>
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 4px 0', letterSpacing: '0.5px' }}>CONSUMPTION & CLIMATE REPORT</h2>
+                <p style={{ margin: '0', fontSize: '13px', color: 'var(--color-text-muted)' }}>Smart Home Energy & Environment Log</p>
               </div>
-              <div className="print-meta-box">
-                <div><strong>Report Date:</strong> {new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}</div>
-                <div><strong>Device ID:</strong> SM-PR-942851</div>
-                <div><strong>Grid Status:</strong> Calibrated & Verified</div>
+              <div style={{ textAlign: 'right', fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+                <div><strong>Selected Month:</strong> {selectedMonth}</div>
+                <div><strong>Climate Source:</strong> {sensors.find(s => s.id === selectedSensorKey)?.name || selectedSensorKey}</div>
+                <div><strong>Generated:</strong> {new Date().toLocaleDateString('en-US', { dateStyle: 'medium' })}</div>
               </div>
             </div>
 
-            {/* KPIs */}
-            {includeKpis && powerData && (
-              <div className="print-section print-kpi-block">
-                <h3 className="print-sec-title">Energy Consumption Summary</h3>
-                <div className="print-kpi-grid">
-                  <div className="print-kpi-item">
-                    <span className="pkpi-label">Active Power Load</span>
-                    <span className="pkpi-value">{powerData.currentLoad} W</span>
-                  </div>
-                  <div className="print-kpi-item">
-                    <span className="pkpi-label">Energy Consumed (Today)</span>
-                    <span className="pkpi-value">{powerData.todayKwh} kWh</span>
-                  </div>
-                  <div className="print-kpi-item">
-                    <span className="pkpi-label">Energy Consumed (Month)</span>
-                    <span className="pkpi-value">{powerData.monthKwh} kWh</span>
-                  </div>
-                  <div className="print-kpi-item">
-                    <span className="pkpi-label">Est. Cost (Month)</span>
-                    <span className="pkpi-value">${powerData.estMonthlyCost.toFixed(2)}</span>
-                  </div>
+            {/* Monthly Summary Metrics */}
+            <div className="print-section" style={{ marginBottom: '24px' }}>
+              <div style={{ display: 'flex', gap: '20px' }}>
+                <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                  <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Monthly Consumption</span>
+                  <span style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-primary)' }}>{totalMonthlyKwh.toFixed(1)} kWh</span>
+                </div>
+                <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                  <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Estimated Cost</span>
+                  <span style={{ fontSize: '20px', fontWeight: 800, color: 'var(--color-warning)' }}>{totalMonthlyCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD</span>
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* Charts */}
-            {includeCharts && powerData && (
-              <div className="print-section print-avoid-break">
-                <h3 className="print-sec-title">Power Load Profile (24h Trend)</h3>
-                <div className="print-chart-box">
-                  {/* Clean SVG rendering for print */}
-                  <svg width="100%" height="130" style={{ overflow: 'visible' }}>
-                    {/* Basic vector chart for print representation */}
-                    <line x1="50" y1="10" x2="50" y2="110" stroke="#000" strokeWidth="1" />
-                    <line x1="50" y1="110" x2="600" y2="110" stroke="#000" strokeWidth="1" />
-                    <text x="40" y="15" fontSize="9" textAnchor="end">3.0 kW</text>
-                    <text x="40" y="60" fontSize="9" textAnchor="end">1.5 kW</text>
-                    <text x="40" y="105" fontSize="9" textAnchor="end">0 kW</text>
-                    
-                    <text x="60" y="122" fontSize="9">00:00</text>
-                    <text x="200" y="122" fontSize="9">08:00</text>
-                    <text x="340" y="122" fontSize="9">12:00</text>
-                    <text x="480" y="122" fontSize="9">18:00</text>
-                    
-                    {/* Simple curve representing the hourly load */}
-                    <path
-                      d={`M 50,95 Q 120,60 200,40 T 350,90 T 500,30 T 600,95`}
-                      fill="none"
-                      stroke="#4f46e5"
-                      strokeWidth="2"
-                    />
-                  </svg>
-                  <p className="print-caption">Diurnal energy profile indicating load peaks around breakfast (08:00) and evening hours (18:00 - 21:00).</p>
-                </div>
-              </div>
-            )}
-
-            {/* Breakdown */}
-            {includeBreakdown && powerData && (
-              <div className="print-section print-avoid-break">
-                <h3 className="print-sec-title">Power Allocation Breakdown</h3>
-                <table className="print-table">
-                  <thead>
-                    <tr>
-                      <th>Appliance Group</th>
-                      <th className="text-right">Usage Share (%)</th>
-                      <th className="text-right">Cumulative Monthly (kWh)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {powerData.breakdown.map((item, idx) => (
-                      <tr key={idx}>
-                        <td>{item.name}</td>
-                        <td className="text-right">{item.percentage}%</td>
-                        <td className="text-right">{item.kwh} kWh</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Table of Daily History */}
-            {includeTable && powerData && (
-              <div className="print-section print-avoid-break">
-                <h3 className="print-sec-title">Recent Daily Consumption Logs</h3>
-                <table className="print-table compact">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th className="text-right">Energy (kWh)</th>
-                      <th className="text-right">Peak Load (kW)</th>
-                      <th className="text-right">Daily Cost ($)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {powerData.dailyHistory.slice(-7).reverse().map((day, idx) => (
-                      <tr key={idx}>
-                        <td>{day.date}</td>
-                        <td className="text-right">{day.kwh} kWh</td>
-                        <td className="text-right">{day.peakKw} kW</td>
-                        <td className="text-right">${day.cost.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="print-caption">*Showing log records of the last 7 active days. Complete 30-day log is available in the exported CSV spreadsheet.</p>
-              </div>
-            )}
-
-            {/* Climate Sensors */}
-            {includeClimate && (
-              <div className="print-section print-avoid-break">
-                <h3 className="print-sec-title">Connected Climate Monitors Status</h3>
-                <div className="print-climate-grid">
-                  {sensors.map((sensor, idx) => (
-                    <div key={idx} className="print-climate-item">
-                      <h4>{sensor.name}</h4>
-                      <p><strong>Location:</strong> {sensor.location}</p>
-                      <div className="print-climate-readings">
-                        <span><strong>Temperature:</strong> {sensor.currentTemp.toFixed(1)}°C</span>
-                        <span><strong>Relative Humidity:</strong> {sensor.currentHumidity}%</span>
-                        <span><strong>Battery:</strong> {sensor.battery}%</span>
-                      </div>
+            {/* Graphs Section */}
+            <div className="print-section" style={{ marginBottom: '28px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 16px 0', textTransform: 'uppercase', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>Graphs Preview</h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                {powerData && (
+                  <div>
+                    <h4 style={{ fontSize: '13px', fontWeight: 600, margin: '0 0 8px 0' }}>Daily Power Consumption (kWh)</h4>
+                    <div style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '12px' }}>
+                      <BarChart 
+                        data={powerDailyData} 
+                        xKey="date" 
+                        yKey="kwh"
+                        yLabel="Energy Use"
+                        color="var(--color-primary)"
+                        height={180}
+                        valueSuffix=" kWh"
+                      />
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: 600, margin: '0 0 8px 0' }}>
+                    Daily Climate: {climateMetric === 'temp' ? 'Average Temperature (°C)' : 'Average Humidity (%)'}
+                  </h4>
+                  <div style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '12px' }}>
+                    <LineAreaChart 
+                      data={climateDailyData} 
+                      xKey="date" 
+                      yKey={climateMetric}
+                      yLabel={climateMetric === 'temp' ? 'Avg Temp' : 'Avg Humidity'}
+                      color={climateMetric === 'temp' ? 'var(--color-primary)' : 'var(--color-secondary)'}
+                      fillColor={climateMetric === 'temp' ? 'url(#gradient-indigo)' : 'url(#gradient-emerald)'}
+                      height={180}
+                      valueSuffix={climateMetric === 'temp' ? '°C' : '%'}
+                    />
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* Table Section */}
+            <div className="print-section" style={{ marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, margin: '0 0 12px 0', textTransform: 'uppercase', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)', paddingBottom: '6px' }}>Consolidated Log Table</h3>
+              
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left' }}>
+                      <th style={{ padding: '8px 4px', fontWeight: 600 }}>Date</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 600, textAlign: 'right' }}>Energy (kWh)</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 600, textAlign: 'right' }}>Daily Cost (RSD)</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 600, textAlign: 'right' }}>Avg Temp (°C)</th>
+                      <th style={{ padding: '8px 4px', fontWeight: 600, textAlign: 'right' }}>Avg Humidity (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportTableData.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ padding: '16px 4px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                          No historical data found for this calendar month.
+                        </td>
+                      </tr>
+                    ) : (
+                      reportTableData.map((row, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <td style={{ padding: '6px 4px' }}>{row.date}</td>
+                          <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                            {row.kwh !== null ? `${row.kwh.toFixed(1)} kWh` : 'N/A'}
+                          </td>
+                          <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                            {row.cost !== null ? `${row.cost.toFixed(1)} RSD` : 'N/A'}
+                          </td>
+                          <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                            {row.temp !== null ? `${row.temp.toFixed(1)}°C` : 'N/A'}
+                          </td>
+                          <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                            {row.humidity !== null ? `${row.humidity}%` : 'N/A'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
             {/* Print Footer */}
-            <div className="print-report-footer">
-              <p>AetherSmart Energy Reporter // System firmware version 2.4.1 // Confirmed safe operation by GridGuard Security.</p>
-              <p>Page 1 of 1</p>
+            <div className="print-report-footer" style={{ marginTop: '30px', borderTop: '1px solid var(--color-border)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--color-text-muted)' }}>
+              <span>Historical Summary Report // AetherSmart Home Analytics</span>
+              <span>Page 1 of 1</span>
             </div>
           </div>
         </section>

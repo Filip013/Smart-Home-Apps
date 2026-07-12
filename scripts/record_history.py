@@ -203,8 +203,21 @@ if power_device_id:
                         hourly_kwh[h] = round(sum(by_hour[h]) / scale, 3)
 
             kwh = round(sum(hourly_kwh), 1)
-            peak_kw = round(kwh * 0.15, 1)
-            cost = round(kwh * 0.15, 2)
+            
+            # Calculate cost using High/Low Tariff schedule in RSD:
+            # Low Tariff (Night): 00:00 to 07:59 -> 4.15 RSD/kWh
+            # High Tariff (Day): 08:00 to 23:59 -> 13.45 RSD/kWh
+            cost = 0.0
+            for h in range(24):
+                h_kwh = hourly_kwh[h]
+                if h >= 0 and h < 8:
+                    cost += h_kwh * 4.15
+                else:
+                    cost += h_kwh * 13.45
+            cost = round(cost, 2)
+            
+            # Peak kW estimation
+            peak_kw = round(max(hourly_kwh) * 4 if len(hourly_kwh) > 0 else kwh * 0.15, 1)
 
             print(f"Calculated -> Total kWh: {kwh}, Cost: {cost}")
 

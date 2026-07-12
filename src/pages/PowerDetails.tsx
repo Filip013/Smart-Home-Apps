@@ -29,6 +29,36 @@ const getLocalCurrentMonthStr = () => {
   return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
 };
 
+const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
+  if (hourlyKwh && hourlyKwh.length === 24) {
+    let cost = 0;
+    hourlyKwh.forEach((val, hour) => {
+      if (hour >= 0 && hour < 8) {
+        cost += val * 4.15;
+      } else {
+        cost += val * 13.45;
+      }
+    });
+    return cost;
+  }
+  // Default weighted average estimation: 70% Day (13.45), 30% Night (4.15) -> 10.66 RSD/kWh
+  return kwh * 10.66;
+};
+
+const calculateTodayCostRSD = (hourlyHistory: any[]) => {
+  let totalCost = 0;
+  hourlyHistory.forEach(h => {
+    const hour = parseInt(h.time.split(':')[0], 10);
+    const kwh = h.loadWatts / 1000.0;
+    if (hour >= 0 && hour < 8) {
+      totalCost += kwh * 4.15;
+    } else {
+      totalCost += kwh * 13.45;
+    }
+  });
+  return totalCost;
+};
+
 export const PowerDetails: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -190,6 +220,17 @@ export const PowerDetails: React.FC = () => {
       return dateStr;
     }
   };
+
+  // Cost calculations in RSD based on High/Low tariffs
+  const todayCostRSD = powerData ? calculateTodayCostRSD(powerData.hourlyHistory) : 0;
+  
+  const monthlyCostRSD = powerData
+    ? powerData.dailyHistory
+        .filter(d => d.date.startsWith(selectedMonth))
+        .reduce((acc, d) => {
+          return acc + calculateDailyCostRSD(d.kwh, d.hourly);
+        }, 0)
+    : 0;
 
   // 1. Process Power History Chart Data (Filtered by Selected Month for 30d view)
   const powerDailyData = powerData
@@ -421,9 +462,9 @@ export const PowerDetails: React.FC = () => {
               <DollarSign className="kpi-icon text-warning" />
               <span className="kpi-title">Est. Monthly Cost</span>
             </div>
-            <div className="kpi-value">${powerData.estMonthlyCost.toFixed(2)}</div>
+            <div className="kpi-value">{monthlyCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD</div>
             <div className="kpi-footer">
-              <span className="text-muted">Rate Plan: Flat $0.15/kWh</span>
+              <span className="text-muted">Rate Plan: High (13.45) / Low (4.15) RSD</span>
             </div>
           </div>
         </section>
@@ -512,9 +553,9 @@ export const PowerDetails: React.FC = () => {
               <span className="summary-stat-val text-warning">
                 {timeRange === '24h' 
                   ? (selectedDate === today 
-                      ? `$${(powerData.todayKwh * 0.15).toFixed(2)}` 
-                      : `$${(historicalPowerDay?.cost || 0).toFixed(2)}`)
-                  : `$${powerDailyData.reduce((acc, d) => acc + d.cost, 0).toFixed(2)}`}
+                      ? `${todayCostRSD.toFixed(1)} RSD` 
+                      : `${(historicalPowerDay ? (historicalPowerDay.cost !== undefined && historicalPowerDay.cost !== null && historicalPowerDay.cost !== 0.0 ? historicalPowerDay.cost : calculateDailyCostRSD(historicalPowerDay.kwh, historicalPowerDay.hourly)) : 0).toFixed(1)} RSD`)
+                  : `${monthlyCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`}
               </span>
             </div>
           </div>
