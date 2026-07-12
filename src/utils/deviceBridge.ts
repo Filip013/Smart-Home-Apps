@@ -303,6 +303,7 @@ export const fetchLivePowerMeter = async (
 
   try {
     const status = await getDeviceStatus(deviceId);
+    console.log("Raw Power Meter Status:", status);
 
     const powerStatus = status.find(s => s.code === pCode);
     const voltStatus = status.find(s => s.code === vCode);
