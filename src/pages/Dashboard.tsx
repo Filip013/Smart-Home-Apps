@@ -73,10 +73,20 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     if (!powerData || mode !== 'live') return;
 
+    let intervalId: any = null;
+
+    const stopSync = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
     const runSync = async () => {
-      // Skip if page is not visible to conserve API requests
-      if (document.hidden) return;
-      
+      if (document.hidden) {
+        stopSync();
+        return;
+      }
       try {
         const config = await getTuyaConfig();
         if (config && config.powerDeviceId) {
@@ -99,17 +109,29 @@ export const Dashboard: React.FC = () => {
       }
     };
 
-    const interval = setInterval(runSync, 3000); // 3 seconds
+    const startSync = () => {
+      stopSync();
+      runSync();
+      intervalId = setInterval(runSync, 3000); // 3 seconds
+    };
+
+    // Initial setup if visible
+    if (!document.hidden) {
+      startSync();
+    }
 
     const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        runSync();
+      if (document.hidden) {
+        stopSync();
+      } else {
+        startSync();
       }
     };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      clearInterval(interval);
+      stopSync();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [powerData === null, mode]);
@@ -261,7 +283,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div className="metric-row">
                   <span className="metric-name">Current Draw</span>
-                  <span className="metric-val">{powerData.currentAmps} A</span>
+                  <span className="metric-val">{powerData.currentAmps.toFixed(2)} A</span>
                 </div>
                 <div className="metric-row">
                   <span className="metric-name">Est. Cost (Month)</span>
