@@ -70,13 +70,22 @@ export const Settings: React.FC = () => {
   const [tuyaErrorMsg, setTuyaErrorMsg] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
-  // Recalculate yesterday's energy stats utility
+  const getLocalYesterdayDateStr = () => {
+    const now = new Date();
+    // Convert to Belgrade date first to ensure we get the correct Belgrade yesterday date
+    const belgradeTimeStr = now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' });
+    const localDate = new Date(belgradeTimeStr);
+    const yesterday = new Date(localDate.getTime() - 24 * 60 * 60 * 1000);
+    return `${yesterday.getFullYear()}-${(yesterday.getMonth() + 1).toString().padStart(2, '0')}-${yesterday.getDate().toString().padStart(2, '0')}`;
+  };
+
+  const [recalcDate, setRecalcDate] = useState(getLocalYesterdayDateStr());
   const [recalcStatus, setRecalcStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [recalcMsg, setRecalcMsg] = useState('');
 
-  const handleRecalculateYesterday = async () => {
+  const handleRecalculateDate = async () => {
     setRecalcStatus('running');
-    setRecalcMsg('Fetching yesterday\'s logs...');
+    setRecalcMsg(`Fetching logs for ${recalcDate}...`);
     try {
       const config = await getTuyaConfig();
       if (!config || !config.powerDeviceId) {
@@ -88,31 +97,22 @@ export const Settings: React.FC = () => {
         throw new Error("You must be logged in to sync to Firestore.");
       }
 
-      // Calculate Yesterday's Belgrade date and timestamps
       const now = new Date();
-      
       // Determine Belgrade time offset dynamically to handle DST
       const belgradeTimeStr = now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' });
       const belgradeOffsetMs = new Date(belgradeTimeStr).getTime() - now.getTime();
-      
-      // Get midnight local Belgrade time today
-      const localDateStr = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Europe/Belgrade',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      }).format(now);
-      const [month, day, year] = localDateStr.split('/');
-      const todayLocal = new Date(`${year}-${month}-${day}T00:00:00`);
-      
-      // Get UTC timestamps for Belgrade midnight yesterday and Belgrade midnight today
-      const midnightTodayUtc = todayLocal.getTime() - belgradeOffsetMs;
-      const midnightYesterdayUtc = midnightTodayUtc - 24 * 60 * 60 * 1000;
-      
-      const yesterdayDateStr = new Date(midnightYesterdayUtc + belgradeOffsetMs).toISOString().split('T')[0];
-      setRecalcMsg(`Fetching logs for ${yesterdayDateStr} (Belgrade local time)...`);
 
-      // Fetch logs of add_ele (energy increments) since yesterday midnight
+      // Parse the selected date
+      const [year, month, day] = recalcDate.split('-');
+      const targetLocalMidnight = new Date(`${year}-${month}-${day}T00:00:00`);
+      
+      // Get UTC timestamps for Belgrade midnight on the target date and next date
+      const targetMidnightUtc = targetLocalMidnight.getTime() - belgradeOffsetMs;
+      const targetNextMidnightUtc = targetMidnightUtc + 24 * 60 * 60 * 1000;
+      
+      setRecalcMsg(`Fetching logs for ${recalcDate} (Belgrade local time)...`);
+
+      // Fetch logs of add_ele (energy increments)
       const eCode = config.energyCode || 'add_ele';
       
       // We will paginate to make sure we fetch all logs (up to 5 pages, 500 logs)
@@ -123,7 +123,7 @@ export const Settings: React.FC = () => {
       
       while (hasMore && pageCount < 5) {
         const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
-        const path = `/v2.0/cloud/thing/${config.powerDeviceId}/report-logs?codes=${eCode}&start_time=${midnightYesterdayUtc}&end_time=${midnightTodayUtc}&size=100${rowKeyParam}`;
+        const path = `/v2.0/cloud/thing/${config.powerDeviceId}/report-logs?codes=${eCode}&start_time=${targetMidnightUtc}&end_time=${targetNextMidnightUtc}&size=100${rowKeyParam}`;
         const res = await makeTuyaRequest(path, 'GET');
         
         if (!res || !res.success) {
@@ -142,7 +142,7 @@ export const Settings: React.FC = () => {
       }
 
       if (allLogs.length === 0) {
-        throw new Error(`No energy logs found for ${yesterdayDateStr}.`);
+        throw new Error(`No energy logs found for ${recalcDate}.`);
       }
 
       setRecalcMsg(`Grouping ${allLogs.length} logs and writing to Firestore...`);
@@ -177,8 +177,8 @@ export const Settings: React.FC = () => {
       cost = Number(cost.toFixed(2));
       const peakKw = Number((Math.max(...hourlyKwh) * 4).toFixed(1));
 
-      // Save merged record to Firestore
-      const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', user.uid, 'energyHistory', yesterdayDateStr);
+      // Save merged record to Firestore using the exact Belgrade date string
+      const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', user.uid, 'energyHistory', recalcDate);
       await setDoc(docRef, {
         kwh: totalKwh,
         peakKw,
@@ -189,7 +189,7 @@ export const Settings: React.FC = () => {
       });
 
       setRecalcStatus('success');
-      setRecalcMsg(`Successfully recalculated ${yesterdayDateStr}: ${totalKwh} kWh (${allLogs.length} logs, cost: ${cost} RSD)`);
+      setRecalcMsg(`Successfully recalculated ${recalcDate}: ${totalKwh} kWh (${allLogs.length} logs, cost: ${cost} RSD)`);
     } catch (err: any) {
       console.error(err);
       setRecalcStatus('error');
@@ -726,18 +726,37 @@ async function handleRequest(request) {
                 </p>
 
                 <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Target Date:</span>
+                    <input 
+                      type="date"
+                      value={recalcDate}
+                      onChange={(e) => setRecalcDate(e.target.value)}
+                      max={getLocalYesterdayDateStr()}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--color-border)',
+                        backgroundColor: 'var(--color-card-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '13px',
+                        fontWeight: 600
+                      }}
+                    />
+                  </div>
+                  
                   <button 
                     type="button" 
-                    onClick={handleRecalculateYesterday} 
+                    onClick={handleRecalculateDate} 
                     className="btn secondary"
                     disabled={recalcStatus === 'running'}
-                    style={{ fontSize: '13px', padding: '8px 16px', minWidth: '220px' }}
+                    style={{ fontSize: '13px', padding: '8px 16px' }}
                   >
                     {recalcStatus === 'running' && <RefreshCw size={14} className="animate-spin" style={{ marginRight: '8px', display: 'inline' }} />}
-                    Recalculate Yesterday's Energy
+                    Recalculate Historical Energy
                   </button>
                   <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                    Queries logs from Belgrade midnight to midnight and rewrites the record in Firestore.
+                    Queries logs for the target Belgrade date (midnight to midnight) and rewrites the Firestore record.
                   </span>
                 </div>
 
