@@ -352,7 +352,7 @@ export const PowerDetails: React.FC = () => {
   const selectedMonthCostRSD = powerData
     ? Number(
         selectedMonthDays.reduce((acc, d) => {
-          return acc + (d.cost !== undefined && d.cost !== null && d.cost !== 0.0 ? d.cost : calculateDailyCostRSD(d.kwh, d.hourly));
+          return acc + calculateDailyCostRSD(d.kwh, d.hourly);
         }, 0).toFixed(2)
       )
     : 0;
@@ -368,7 +368,7 @@ export const PowerDetails: React.FC = () => {
 
   const selectedDayCostRSD = isToday
     ? todayCostRSD
-    : (historicalPowerDay ? (historicalPowerDay.cost !== undefined && historicalPowerDay.cost !== null && historicalPowerDay.cost !== 0.0 ? historicalPowerDay.cost : calculateDailyCostRSD(historicalPowerDay.kwh, historicalPowerDay.hourly)) : 0);
+    : (historicalPowerDay ? calculateDailyCostRSD(historicalPowerDay.kwh, historicalPowerDay.hourly) : 0);
 
   return (
     <div className="power-details-view animate-fade-in">
@@ -462,25 +462,25 @@ export const PowerDetails: React.FC = () => {
       {powerData && (
         <section className="stats-kpi-grid" aria-label="Power Meter Key Statistics" style={{ marginBottom: '24px' }}>
           
-          {/* Card 1: Realtime Load (24h Today) or Peak Demand */}
+          {/* Card 1: Today's Peak Load or Peak Demand */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <Zap className="kpi-icon text-accent" />
               <span className="kpi-title">
                 {timeRange === '24h' 
-                  ? (isToday ? "Current Realtime Load" : "Peak Load (Selected Day)") 
+                  ? (isToday ? "Today's Peak Load" : "Peak Load (Selected Day)") 
                   : "Peak Power (Selected Month)"}
               </span>
             </div>
             <div className="kpi-value">
               {timeRange === '24h'
-                ? (isToday ? `${powerData.currentLoad.toLocaleString()} W` : `${(selectedDayPeakKw * 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} W`)
+                ? `${(selectedDayPeakKw * 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} W`
                 : `${(selectedMonthPeakKw).toFixed(2)} kW`}
             </div>
             <div className="kpi-footer">
               <span className="text-muted">
                 {timeRange === '24h'
-                  ? (isToday ? `Grid Voltage: ${powerData.voltage} V` : "Peak load recorded during selected day")
+                  ? (isToday ? "Peak load recorded today" : "Peak load recorded during selected day")
                   : "Highest demand registered during selected month"}
               </span>
             </div>
@@ -530,20 +530,20 @@ export const PowerDetails: React.FC = () => {
               <DollarSign className="kpi-icon text-warning" />
               <span className="kpi-title">
                 {timeRange === '24h' 
-                  ? (isToday ? "Est. Monthly Cost" : "Cost (Selected Day)") 
+                  ? (isToday ? "Today's Cost" : "Cost (Selected Day)") 
                   : "Cost (Selected Month)"}
               </span>
             </div>
             <div className="kpi-value">
-              {timeRange === '24h' && isToday
-                ? `${selectedMonthCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`
-                : `${(timeRange === '24h' ? selectedDayCostRSD : selectedMonthCostRSD).toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`}
+              {timeRange === '24h'
+                ? `${selectedDayCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`
+                : `${selectedMonthCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`}
             </div>
             <div className="kpi-footer">
               <span className="text-muted">
-                {timeRange === '24h' && isToday
-                  ? "Accumulated cost for the active calendar month"
-                  : "Calculated using High/Low Tariff schedule"}
+                {timeRange === '24h'
+                  ? "Calculated using High/Low Tariff schedule"
+                  : "Accumulated cost for the selected month"}
               </span>
             </div>
           </div>

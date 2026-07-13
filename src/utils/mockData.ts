@@ -131,7 +131,7 @@ const generate30DayPowerHistory = (): DailyPowerReading[] => {
     const peakKw = Number((baseEnergy / 4 + Math.random() * 1.5).toFixed(2));
     const cost = Number((baseEnergy * 0.15).toFixed(2)); // $0.15 per kWh
     
-    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dateStr = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
     
     history.push({
       date: dateStr,

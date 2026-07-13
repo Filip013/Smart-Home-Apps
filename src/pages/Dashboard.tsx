@@ -16,6 +16,21 @@ import {
   Settings
 } from 'lucide-react';
 
+const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
+  if (hourlyKwh && hourlyKwh.length === 24) {
+    let cost = 0;
+    hourlyKwh.forEach((val, hour) => {
+      if (hour >= 0 && hour < 8) {
+        cost += val * 4.15;
+      } else {
+        cost += val * 13.45;
+      }
+    });
+    return cost;
+  }
+  return kwh * 10.66;
+};
+
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [sensors, setSensors] = useState<TempSensor[]>([]);
@@ -139,6 +154,16 @@ export const Dashboard: React.FC = () => {
   const onlineDevicesCount = sensors.filter(s => s.status === 'online').length + 
                              (powerData ? (powerData.name.includes('Offline') ? 0 : 1) : 0);
 
+  // Calculate monthly cost in RSD for Dashboard
+  const currentMonth = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}`;
+  const monthlyCostRSD = powerData
+    ? (powerData.dailyHistory.filter(d => d.date.startsWith(currentMonth)).length > 0
+        ? powerData.dailyHistory
+            .filter(d => d.date.startsWith(currentMonth))
+            .reduce((acc, d) => acc + calculateDailyCostRSD(d.kwh, d.hourly), 0)
+        : powerData.monthKwh * 10.66)
+    : 0;
+
   // Get greenhouse alerts
   const greenhouse = sensors.find(s => s.id === 'temp-greenhouse');
   const showGreenhouseAlert = greenhouse && greenhouse.currentTemp > 29.5;
@@ -240,7 +265,7 @@ export const Dashboard: React.FC = () => {
                 </div>
                 <div className="metric-row">
                   <span className="metric-name">Est. Cost (Month)</span>
-                  <span className="metric-val">${powerData.estMonthlyCost.toFixed(2)}</span>
+                  <span className="metric-val">{monthlyCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD</span>
                 </div>
               </div>
             </div>
