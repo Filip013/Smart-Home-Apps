@@ -333,6 +333,43 @@ export const PowerDetails: React.FC = () => {
         }))
     : [];
 
+  const isToday = selectedDate === today;
+
+  // Selected Month Energy Total (dynamic based on selectedMonth)
+  const selectedMonthDays = powerData
+    ? powerData.dailyHistory.filter(d => d.date.startsWith(selectedMonth))
+    : [];
+  const selectedMonthEnergyTotal = Number(
+    selectedMonthDays.reduce((acc, d) => acc + d.kwh, 0).toFixed(2)
+  );
+
+  // Selected Month Peak Power
+  const selectedMonthPeakKw = selectedMonthDays.length > 0
+    ? Math.max(...selectedMonthDays.map(d => d.peakKw), 0)
+    : 0;
+
+  // Selected Month Cost
+  const selectedMonthCostRSD = powerData
+    ? Number(
+        selectedMonthDays.reduce((acc, d) => {
+          return acc + (d.cost !== undefined && d.cost !== null && d.cost !== 0.0 ? d.cost : calculateDailyCostRSD(d.kwh, d.hourly));
+        }, 0).toFixed(2)
+      )
+    : 0;
+
+  // Selected Day Energy, Peak and Cost
+  const selectedDayKwh = isToday
+    ? (powerData?.todayKwh || 0)
+    : (historicalPowerDay?.kwh || 0);
+
+  const selectedDayPeakKw = isToday
+    ? (peakLoad24h / 1000.0)
+    : (historicalPowerDay?.peakKw || 0);
+
+  const selectedDayCostRSD = isToday
+    ? todayCostRSD
+    : (historicalPowerDay ? (historicalPowerDay.cost !== undefined && historicalPowerDay.cost !== null && historicalPowerDay.cost !== 0.0 ? historicalPowerDay.cost : calculateDailyCostRSD(historicalPowerDay.kwh, historicalPowerDay.hourly)) : 0);
+
   return (
     <div className="power-details-view animate-fade-in">
       {mode === 'demo' && (
@@ -424,47 +461,90 @@ export const PowerDetails: React.FC = () => {
       {/* KPI Cards Grid */}
       {powerData && (
         <section className="stats-kpi-grid" aria-label="Power Meter Key Statistics" style={{ marginBottom: '24px' }}>
+          
+          {/* Card 1: Realtime Load (24h Today) or Peak Demand */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <Zap className="kpi-icon text-accent" />
-              <span className="kpi-title">Current Realtime Load</span>
+              <span className="kpi-title">
+                {timeRange === '24h' 
+                  ? (isToday ? "Current Realtime Load" : "Peak Load (Selected Day)") 
+                  : "Peak Power (Selected Month)"}
+              </span>
             </div>
-            <div className="kpi-value">{powerData.currentLoad.toLocaleString()} W</div>
+            <div className="kpi-value">
+              {timeRange === '24h'
+                ? (isToday ? `${powerData.currentLoad.toLocaleString()} W` : `${(selectedDayPeakKw * 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })} W`)
+                : `${(selectedMonthPeakKw).toFixed(2)} kW`}
+            </div>
             <div className="kpi-footer">
-              <span className="text-muted">Grid Voltage: {powerData.voltage} V</span>
+              <span className="text-muted">
+                {timeRange === '24h'
+                  ? (isToday ? `Grid Voltage: ${powerData.voltage} V` : "Peak load recorded during selected day")
+                  : "Highest demand registered during selected month"}
+              </span>
             </div>
           </div>
 
+          {/* Card 2: Energy Use (Selected Day vs Month Avg) */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <TrendingUp className="kpi-icon text-success" />
-              <span className="kpi-title">Today's Energy Use</span>
+              <span className="kpi-title">
+                {timeRange === '24h' 
+                  ? (isToday ? "Today's Energy Use" : "Energy Use (Selected Day)") 
+                  : "Avg Daily Energy"}
+              </span>
             </div>
-            <div className="kpi-value">{powerData.todayKwh} kWh</div>
+            <div className="kpi-value">
+              {timeRange === '24h'
+                ? `${selectedDayKwh} kWh`
+                : `${selectedMonthDays.length > 0 ? (selectedMonthEnergyTotal / selectedMonthDays.length).toFixed(2) : 0} kWh`}
+            </div>
             <div className="kpi-footer">
-              <span className="text-muted">CO₂ Footprint: {(powerData.todayKwh * 0.385).toFixed(2)} kg</span>
+              <span className="text-muted">
+                {timeRange === '24h'
+                  ? `CO₂ Footprint: ${(selectedDayKwh * 0.385).toFixed(2)} kg`
+                  : "Daily average consumption for selected month"}
+              </span>
             </div>
           </div>
 
+          {/* Card 3: Selected Month Energy Total */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <Calendar className="kpi-icon text-primary" />
-              <span className="kpi-title">Monthly Energy Total</span>
+              <span className="kpi-title">Energy Total (Selected Month)</span>
             </div>
-            <div className="kpi-value">{powerData.monthKwh} kWh</div>
+            <div className="kpi-value">{selectedMonthEnergyTotal} kWh</div>
             <div className="kpi-footer">
-              <span className="text-muted">Weekly Avg: {(powerData.weekKwh / 7).toFixed(1)} kWh/day</span>
+              <span className="text-muted">
+                Days Recorded: {selectedMonthDays.length}
+              </span>
             </div>
           </div>
 
+          {/* Card 4: Cost (Selected Day vs Month Cost) */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <DollarSign className="kpi-icon text-warning" />
-              <span className="kpi-title">Est. Monthly Cost</span>
+              <span className="kpi-title">
+                {timeRange === '24h' 
+                  ? (isToday ? "Est. Monthly Cost" : "Cost (Selected Day)") 
+                  : "Cost (Selected Month)"}
+              </span>
             </div>
-            <div className="kpi-value">{monthlyCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD</div>
+            <div className="kpi-value">
+              {timeRange === '24h' && isToday
+                ? `${selectedMonthCostRSD.toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`
+                : `${(timeRange === '24h' ? selectedDayCostRSD : selectedMonthCostRSD).toLocaleString(undefined, { maximumFractionDigits: 0 })} RSD`}
+            </div>
             <div className="kpi-footer">
-              <span className="text-muted">Rate Plan: High (13.45) / Low (4.15) RSD</span>
+              <span className="text-muted">
+                {timeRange === '24h' && isToday
+                  ? "Accumulated cost for the active calendar month"
+                  : "Calculated using High/Low Tariff schedule"}
+              </span>
             </div>
           </div>
         </section>

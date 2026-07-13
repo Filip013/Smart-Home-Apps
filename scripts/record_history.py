@@ -5,7 +5,8 @@ import hmac
 import hashlib
 import calendar
 import requests
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
+from zoneinfo import ZoneInfo
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -126,11 +127,12 @@ if power_device_id:
         logs = power_logs_res.get('result', {}).get('logs', [])
         print(f"Retrieved {len(logs)} energy logs.")
         
-        # Group logs by date
+        # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
         logs_by_date = {}
         for log in logs:
-            dt = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
-            date_key = dt.strftime('%Y-%m-%d')
+            dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
+            dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+            date_key = dt_local.strftime('%Y-%m-%d')
             if date_key not in logs_by_date:
                 logs_by_date[date_key] = []
             logs_by_date[date_key].append(log)
@@ -139,15 +141,18 @@ if power_device_id:
             print(f"Merging Energy history for Date: {date_str} ({len(date_logs)} logs)")
             sorted_logs = sorted(date_logs, key=lambda x: int(x['event_time']))
             
-            # Detect if cumulative or incremental
+            # Detect if cumulative or incremental (add_ele is always incremental)
             is_cumulative = True
-            last_val = -1
-            for log in sorted_logs:
-                val = float(log['value'])
-                if last_val != -1 and val < last_val:
-                    is_cumulative = False
-                    break
-                last_val = val
+            if energy_code == 'add_ele':
+                is_cumulative = False
+            else:
+                last_val = -1
+                for log in sorted_logs:
+                    val = float(log['value'])
+                    if last_val != -1 and val < last_val:
+                        is_cumulative = False
+                        break
+                    last_val = val
                 
             # Scale is 1000.0 for add_ele (thousandths of a kWh)
             scale = 1000.0
@@ -169,8 +174,9 @@ if power_device_id:
             # Group date logs by hour
             by_hour = {h: [] for h in range(24)}
             for log in sorted_logs:
-                log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
-                by_hour[log_time.hour].append(float(log['value']))
+                dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
+                dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+                by_hour[dt_local.hour].append(float(log['value']))
 
             if is_cumulative:
                 if start_val == 0.0 and len(sorted_logs) > 0:
@@ -267,11 +273,12 @@ for sensor in sensors:
         logs = climate_res.get('result', {}).get('logs', [])
         print(f"Retrieved {len(logs)} climate logs.")
         
-        # Group logs by date
+        # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
         logs_by_date = {}
         for log in logs:
-            dt = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
-            date_key = dt.strftime('%Y-%m-%d')
+            dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
+            dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+            date_key = dt_local.strftime('%Y-%m-%d')
             if date_key not in logs_by_date:
                 logs_by_date[date_key] = []
             logs_by_date[date_key].append(log)
@@ -301,8 +308,9 @@ for sensor in sensors:
             
             for log in date_logs:
                 val = float(log['value'])
-                log_time = datetime.utcfromtimestamp(int(log['event_time']) / 1000.0)
-                h = log_time.hour
+                dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
+                dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+                h = dt_local.hour
                 if log['code'] == sensor['temp_code']:
                     val_scaled = val / 10.0 if val > 100.0 else val
                     by_hour[h]['temps'].append(val_scaled)

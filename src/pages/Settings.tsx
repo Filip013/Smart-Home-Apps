@@ -4,9 +4,12 @@ import {
   saveTuyaConfig, 
   clearTokenCache,
   testFullConnection,
-  auth
+  makeTuyaRequest,
+  auth,
+  db
 } from '../utils/tuyaService';
 import type { TuyaConfig } from '../utils/tuyaService';
+import { doc, setDoc } from 'firebase/firestore';
 import { 
   Cloud, 
   Key, 
@@ -66,6 +69,133 @@ export const Settings: React.FC = () => {
   const [tuyaStatus, setTuyaStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [tuyaErrorMsg, setTuyaErrorMsg] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Recalculate yesterday's energy stats utility
+  const [recalcStatus, setRecalcStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
+  const [recalcMsg, setRecalcMsg] = useState('');
+
+  const handleRecalculateYesterday = async () => {
+    setRecalcStatus('running');
+    setRecalcMsg('Fetching yesterday\'s logs...');
+    try {
+      const config = await getTuyaConfig();
+      if (!config || !config.powerDeviceId) {
+        throw new Error("Power meter is not configured in Settings.");
+      }
+
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error("You must be logged in to sync to Firestore.");
+      }
+
+      // Calculate Yesterday's Belgrade date and timestamps
+      const now = new Date();
+      
+      // Determine Belgrade time offset dynamically to handle DST
+      const belgradeTimeStr = now.toLocaleString('en-US', { timeZone: 'Europe/Belgrade' });
+      const belgradeOffsetMs = new Date(belgradeTimeStr).getTime() - now.getTime();
+      
+      // Get midnight local Belgrade time today
+      const localDateStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Belgrade',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(now);
+      const [month, day, year] = localDateStr.split('/');
+      const todayLocal = new Date(`${year}-${month}-${day}T00:00:00`);
+      
+      // Get UTC timestamps for Belgrade midnight yesterday and Belgrade midnight today
+      const midnightTodayUtc = todayLocal.getTime() - belgradeOffsetMs;
+      const midnightYesterdayUtc = midnightTodayUtc - 24 * 60 * 60 * 1000;
+      
+      const yesterdayDateStr = new Date(midnightYesterdayUtc + belgradeOffsetMs).toISOString().split('T')[0];
+      setRecalcMsg(`Fetching logs for ${yesterdayDateStr} (Belgrade local time)...`);
+
+      // Fetch logs of add_ele (energy increments) since yesterday midnight
+      const eCode = config.energyCode || 'add_ele';
+      
+      // We will paginate to make sure we fetch all logs (up to 5 pages, 500 logs)
+      let allLogs: any[] = [];
+      let lastRowKey = '';
+      let hasMore = true;
+      let pageCount = 0;
+      
+      while (hasMore && pageCount < 5) {
+        const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
+        const path = `/v2.0/cloud/thing/${config.powerDeviceId}/report-logs?codes=${eCode}&start_time=${midnightYesterdayUtc}&end_time=${midnightTodayUtc}&size=100${rowKeyParam}`;
+        const res = await makeTuyaRequest(path, 'GET');
+        
+        if (!res || !res.success) {
+          throw new Error(res?.msg || "Failed to fetch logs from Tuya API.");
+        }
+        
+        const pageLogs = res.result?.logs || [];
+        allLogs = allLogs.concat(pageLogs);
+        hasMore = res.result?.has_more || false;
+        lastRowKey = res.result?.last_row_key || '';
+        pageCount++;
+        
+        if (pageLogs.length === 0 || !lastRowKey) {
+          break;
+        }
+      }
+
+      if (allLogs.length === 0) {
+        throw new Error(`No energy logs found for ${yesterdayDateStr}.`);
+      }
+
+      setRecalcMsg(`Grouping ${allLogs.length} logs and writing to Firestore...`);
+
+      // Group date logs by Belgrade hour
+      const hourlyKwh = new Array(24).fill(0);
+      allLogs.forEach(log => {
+        const logLocalTime = new Date(Number(log.event_time) + belgradeOffsetMs);
+        const hour = logLocalTime.getUTCHours();
+        if (hour >= 0 && hour < 24) {
+          hourlyKwh[hour] += Number(log.value) || 0;
+        }
+      });
+
+      // Divide by 1000 scale
+      for (let h = 0; h < 24; h++) {
+        hourlyKwh[h] = Number((hourlyKwh[h] / 1000).toFixed(3));
+      }
+
+      const totalKwh = Number(hourlyKwh.reduce((a, b) => a + b, 0).toFixed(2));
+      
+      // Cost: Belgrade High/Low Tariff
+      let cost = 0;
+      for (let h = 0; h < 24; h++) {
+        const hKwh = hourlyKwh[h];
+        if (h >= 0 && h < 8) {
+          cost += hKwh * 4.15;
+        } else {
+          cost += hKwh * 13.45;
+        }
+      }
+      cost = Number(cost.toFixed(2));
+      const peakKw = Number((Math.max(...hourlyKwh) * 4).toFixed(1));
+
+      // Save merged record to Firestore
+      const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', user.uid, 'energyHistory', yesterdayDateStr);
+      await setDoc(docRef, {
+        kwh: totalKwh,
+        peakKw,
+        cost,
+        hourly: hourlyKwh,
+        last_readings: new Array(24).fill(0),
+        start_val: 0
+      });
+
+      setRecalcStatus('success');
+      setRecalcMsg(`Successfully recalculated ${yesterdayDateStr}: ${totalKwh} kWh (${allLogs.length} logs, cost: ${cost} RSD)`);
+    } catch (err: any) {
+      console.error(err);
+      setRecalcStatus('error');
+      setRecalcMsg(err.message || 'An unexpected error occurred.');
+    }
+  };
 
   // Load configurations on mount
   useEffect(() => {
@@ -582,6 +712,49 @@ async function handleRequest(request) {
                   </p>
                 </div>
               )}
+            </section>
+
+            {/* History & Database Utilities */}
+            <section className="dashboard-card glass" aria-labelledby="db-utils-title">
+              <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Database className="card-icon text-info" style={{ color: '#06b6d4' }} />
+                <h3 id="db-utils-title" style={{ margin: 0 }}>History & Database Utilities</h3>
+              </div>
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', margin: 0, lineHeight: '1.4' }}>
+                  Use these tools to manually repair or synchronize your historical statistics stored in Firestore.
+                </p>
+
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button 
+                    type="button" 
+                    onClick={handleRecalculateYesterday} 
+                    className="btn secondary"
+                    disabled={recalcStatus === 'running'}
+                    style={{ fontSize: '13px', padding: '8px 16px', minWidth: '220px' }}
+                  >
+                    {recalcStatus === 'running' && <RefreshCw size={14} className="animate-spin" style={{ marginRight: '8px', display: 'inline' }} />}
+                    Recalculate Yesterday's Energy
+                  </button>
+                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                    Queries logs from Belgrade midnight to midnight and rewrites the record in Firestore.
+                  </span>
+                </div>
+
+                {recalcStatus !== 'idle' && (
+                  <div className={`alert-banner ${recalcStatus === 'success' ? 'success' : recalcStatus === 'error' ? 'warning' : 'info'}`} style={{ 
+                    backgroundColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.1)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)', 
+                    borderColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.2)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)', 
+                    color: recalcStatus === 'success' ? 'var(--color-secondary)' : recalcStatus === 'error' ? 'var(--color-danger)' : 'var(--color-text)',
+                    margin: 0
+                  }}>
+                    {recalcStatus === 'success' && <CheckCircle2 size={16} />}
+                    {recalcStatus === 'error' && <XCircle size={16} />}
+                    {recalcStatus === 'running' && <RefreshCw size={16} className="animate-spin" />}
+                    <span>{recalcMsg}</span>
+                  </div>
+                )}
+              </div>
             </section>
 
             {/* Data Point (DP) Codes Config (Collapsible) */}
