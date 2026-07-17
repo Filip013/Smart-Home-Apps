@@ -35,6 +35,7 @@ export interface TuyaConfig {
   powerName?: string;
   powerLoc?: string;
   localTvBoxIp?: string; // Local IP address and port of the Termux daemon (e.g., http://192.168.1.15:8080)
+  bypassProxyForLocal?: boolean; // Bypass the Cloudflare Worker CORS proxy and fetch directly
 }
 
 // Simulation flag: set to true to force local dev server to use the production CORS proxy path

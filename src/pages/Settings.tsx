@@ -47,6 +47,7 @@ export const Settings: React.FC = () => {
   const [powerDeviceId, setPowerDeviceId] = useState('');
   const [customProxyUrl, setCustomProxyUrl] = useState('');
   const [localTvBoxIp, setLocalTvBoxIp] = useState('');
+  const [bypassProxyForLocal, setBypassProxyForLocal] = useState(false);
 
   // Custom Device Names & Locations state
   const [tempName1, setTempName1] = useState('');
@@ -211,6 +212,7 @@ export const Settings: React.FC = () => {
         setPowerDeviceId(tuya.powerDeviceId || '');
         setCustomProxyUrl(tuya.customProxyUrl || '');
         setLocalTvBoxIp(tuya.localTvBoxIp || '');
+        setBypassProxyForLocal(tuya.bypassProxyForLocal || false);
 
         setTempName1(tuya.tempName1 || '');
         setTempLoc1(tuya.tempLoc1 || '');
@@ -259,7 +261,8 @@ export const Settings: React.FC = () => {
       tempLoc2: tempLoc2.trim(),
       powerName: powerName.trim(),
       powerLoc: powerLoc.trim(),
-      localTvBoxIp: localTvBoxIp.trim()
+      localTvBoxIp: localTvBoxIp.trim(),
+      bypassProxyForLocal
     };
 
     try {
@@ -444,6 +447,21 @@ export const Settings: React.FC = () => {
                     onChange={(e) => setLocalTvBoxIp(e.target.value)} 
                     style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px', marginBottom: '10px' }}
                   />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <input 
+                      type="checkbox" 
+                      id="bypass-proxy-checkbox"
+                      checked={bypassProxyForLocal} 
+                      onChange={(e) => setBypassProxyForLocal(e.target.checked)} 
+                      style={{ cursor: 'pointer', width: 'auto' }}
+                    />
+                    <label htmlFor="bypass-proxy-checkbox" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text)', cursor: 'pointer', userSelect: 'none' }}>
+                      Bypass CORS Proxy (Direct LAN Fetch)
+                    </label>
+                  </div>
+                  <p style={{ margin: '0 0 10px 0', fontSize: '11px', color: 'var(--color-warning)', lineHeight: '1.4' }}>
+                    <em>Note: Browsers block unsecure HTTP queries from HTTPS websites (Mixed Content). Check this box only if you are using a secure Cloudflare Tunnel HTTPS address, or if you configured your browser bypass flags (e.g. enable `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add this app's URL: <code>https://filip013.github.io</code>).</em>
+                  </p>
                   <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
                     <strong>Why use this?</strong> The Tuya Cloud API does not update active power in real-time unless the official Tuya app is actively open. Configuring a local TV Box IP allows the web application to stream instant sub-second updates directly from your Termux local TinyTuya server on your home network.
                   </p>
