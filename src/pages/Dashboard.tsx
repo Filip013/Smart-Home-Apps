@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
-import { getTuyaConfig, getCachedTuyaConfig } from '../utils/tuyaService';
+import { getCachedTuyaConfig } from '../utils/tuyaService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
 import { 

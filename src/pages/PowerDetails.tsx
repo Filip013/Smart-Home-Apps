@@ -7,7 +7,7 @@ import {
   fetchRealDayClimateStats,
   fetchInstantPowerStats
 } from '../utils/deviceBridge';
-import { getTuyaConfig, getCachedTuyaConfig } from '../utils/tuyaService';
+import { getCachedTuyaConfig } from '../utils/tuyaService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
