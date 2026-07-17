@@ -133,21 +133,12 @@ export const PowerDetails: React.FC = () => {
   useEffect(() => {
     if (!powerData || mode !== 'live') return;
 
-    let intervalId: any = null;
+    let timeoutId: any = null;
     let isLocalOnline = false;
-
-    const stopSync = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
+    let isActive = true;
 
     const runSync = async () => {
-      if (document.hidden) {
-        stopSync();
-        return;
-      }
+      if (!isActive) return;
 
       try {
         const config = getCachedTuyaConfig();
@@ -220,14 +211,24 @@ export const PowerDetails: React.FC = () => {
         }
       } catch (err) {
         console.error("Error in real-time power metrics synchronization loop:", err);
+      } finally {
+        // Schedule next sync recursively only if active and tab is visible
+        if (isActive && !document.hidden) {
+          timeoutId = setTimeout(runSync, 1000);
+        }
       }
     };
 
     const startSync = () => {
-      stopSync();
+      if (timeoutId) clearTimeout(timeoutId);
       runSync();
-      // Poll every 1.0 second to achieve high-frequency real-time responsiveness when local is active!
-      intervalId = setInterval(runSync, 1000); 
+    };
+
+    const stopSync = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
     };
 
     // Initial setup if visible
@@ -246,6 +247,7 @@ export const PowerDetails: React.FC = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isActive = false;
       stopSync();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -357,14 +359,38 @@ export const PowerDetails: React.FC = () => {
     : 0;
 
   // 1. Process Power History Chart Data (Filtered by Selected Month for 30d view)
-  const powerDailyData = powerData
-    ? powerData.dailyHistory
-        .filter(d => d.date.startsWith(selectedMonth))
-        .map(d => ({
-          ...d,
-          date: formatChartDate(d.date)
-        }))
-    : [];
+  const todayDateStr = getLocalTodayDateStr();
+  let baseDailyHistory = powerData ? [...powerData.dailyHistory] : [];
+  
+  if (powerData && powerData.todayKwh !== undefined) {
+    const todayIndex = baseDailyHistory.findIndex(d => d.date === todayDateStr);
+    if (todayIndex !== -1) {
+      // Overwrite existing database record with the live todayKwh value
+      baseDailyHistory[todayIndex] = {
+        ...baseDailyHistory[todayIndex],
+        kwh: powerData.todayKwh
+      };
+    } else {
+      // Append today's live stats if the document is not yet saved in Firestore
+      const todayMaxWatts = powerData.hourlyHistory?.length > 0 
+        ? Math.max(...powerData.hourlyHistory.map(h => h.loadWatts)) 
+        : 0;
+      baseDailyHistory.push({
+        date: todayDateStr,
+        kwh: powerData.todayKwh,
+        peakKw: Number((todayMaxWatts / 1000.0).toFixed(2)),
+        cost: todayCostRSD,
+        hourly: []
+      });
+    }
+  }
+
+  const powerDailyData = baseDailyHistory
+    .filter(d => d.date.startsWith(selectedMonth))
+    .map(d => ({
+      ...d,
+      date: formatChartDate(d.date)
+    }));
 
   // 2. Resolve Selected Climate Sensor
   const selectedSensor = sensors.find(s => {

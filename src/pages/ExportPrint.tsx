@@ -105,14 +105,38 @@ export const ExportPrint: React.FC = () => {
 
   const selectedSensor = selectedSensorKey === 'sensor1' ? sensors[0] : sensors[1];
 
-  const powerDailyData = powerData
-    ? powerData.dailyHistory
-        .filter(d => d.date.startsWith(selectedMonth))
-        .map(d => ({
-          ...d,
-          date: formatChartDate(d.date)
-        }))
-    : [];
+  // Compute merged daily history including today's live data
+  const todayDateStr = new Date().toLocaleDateString('en-CA');
+  const todayCostRSD = powerData ? calculateDailyCostRSD(powerData.todayKwh, powerData.hourlyHistory.map(h => h.loadWatts / 1000.0)) : 0;
+
+  let baseDailyHistory = powerData ? [...powerData.dailyHistory] : [];
+  if (powerData && powerData.todayKwh !== undefined) {
+    const todayIndex = baseDailyHistory.findIndex(d => d.date === todayDateStr);
+    if (todayIndex !== -1) {
+      baseDailyHistory[todayIndex] = {
+        ...baseDailyHistory[todayIndex],
+        kwh: powerData.todayKwh
+      };
+    } else {
+      const todayMaxWatts = powerData.hourlyHistory?.length > 0 
+        ? Math.max(...powerData.hourlyHistory.map(h => h.loadWatts)) 
+        : 0;
+      baseDailyHistory.push({
+        date: todayDateStr,
+        kwh: powerData.todayKwh,
+        peakKw: Number((todayMaxWatts / 1000.0).toFixed(2)),
+        cost: todayCostRSD,
+        hourly: []
+      });
+    }
+  }
+
+  const powerDailyData = baseDailyHistory
+    .filter(d => d.date.startsWith(selectedMonth))
+    .map(d => ({
+      ...d,
+      date: formatChartDate(d.date)
+    }));
 
   const climateDailyData = climateHistory
     .filter(entry => entry.date.startsWith(selectedMonth))
@@ -127,18 +151,16 @@ export const ExportPrint: React.FC = () => {
 
   // Merged Daily Report Table Data
   const datesSet = new Set<string>();
-  if (powerData) {
-    powerData.dailyHistory.forEach(d => {
-      if (d.date.startsWith(selectedMonth)) datesSet.add(d.date);
-    });
-  }
+  baseDailyHistory.forEach(d => {
+    if (d.date.startsWith(selectedMonth)) datesSet.add(d.date);
+  });
   climateHistory.forEach(c => {
     if (c.date.startsWith(selectedMonth)) datesSet.add(c.date);
   });
   const sortedDates = Array.from(datesSet).sort();
 
   const reportTableData = sortedDates.map(date => {
-    const pEntry = powerData?.dailyHistory.find(d => d.date === date);
+    const pEntry = baseDailyHistory.find(d => d.date === date);
     const cEntry = climateHistory.find(c => c.date === date);
     const sensorData = cEntry?.sensors?.[selectedSensorKey] || {};
     const kwh = pEntry?.kwh !== undefined ? pEntry.kwh : null;

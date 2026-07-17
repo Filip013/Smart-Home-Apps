@@ -73,21 +73,12 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     if (!powerData || mode !== 'live') return;
 
-    let intervalId: any = null;
+    let timeoutId: any = null;
     let isLocalOnline = false;
-
-    const stopSync = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
+    let isActive = true;
 
     const runSync = async () => {
-      if (document.hidden) {
-        stopSync();
-        return;
-      }
+      if (!isActive) return;
 
       try {
         const config = getCachedTuyaConfig();
@@ -160,14 +151,24 @@ export const Dashboard: React.FC = () => {
         }
       } catch (err) {
         console.error("Error in real-time power metrics synchronization loop:", err);
+      } finally {
+        // Schedule next sync recursively only if active and tab is visible
+        if (isActive && !document.hidden) {
+          timeoutId = setTimeout(runSync, 1000);
+        }
       }
     };
 
     const startSync = () => {
-      stopSync();
+      if (timeoutId) clearTimeout(timeoutId);
       runSync();
-      // Poll every 1.0 second to achieve high-frequency real-time responsiveness when local is active!
-      intervalId = setInterval(runSync, 1000); 
+    };
+
+    const stopSync = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
     };
 
     // Initial setup if visible
@@ -186,6 +187,7 @@ export const Dashboard: React.FC = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      isActive = false;
       stopSync();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
