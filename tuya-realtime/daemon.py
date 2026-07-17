@@ -3,7 +3,7 @@ import sys
 import json
 import time
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import tinytuya
 
 # Determine directory paths
@@ -68,6 +68,7 @@ device = tinytuya.OutletDevice(
 )
 device.set_version(protocol_version)
 device.set_socketPersistent(True)  # Reuse socket for lower latency and better stability
+device.timeout = 1.0                # Short timeout to prevent thread blocking on network lag
 
 # Background thread to poll the Tuya device locally
 def polling_worker():
@@ -179,7 +180,7 @@ def run_server():
     t.start()
     
     server_address = ('', server_port)
-    httpd = HTTPServer(server_address, LocalLiveServer)
+    httpd = ThreadingHTTPServer(server_address, LocalLiveServer)
     print(f"Server listening locally on port {server_port}...")
     print(f"Web app should fetch from: http://<tv-box-ip>:{server_port}/live")
     print("Press Ctrl+C to terminate.")
