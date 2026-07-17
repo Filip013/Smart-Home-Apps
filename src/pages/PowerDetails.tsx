@@ -149,6 +149,9 @@ export const PowerDetails: React.FC = () => {
           try {
             // Standardize IP format (trim trailing slash and ensure protocol)
             let localUrl = config.localTvBoxIp.trim();
+            if (localUrl.toLowerCase().endsWith('/live')) {
+              localUrl = localUrl.slice(0, -5);
+            }
             if (!localUrl.startsWith('http://') && !localUrl.startsWith('https://')) {
               localUrl = `http://${localUrl}`;
             }
