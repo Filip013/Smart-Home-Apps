@@ -28,6 +28,7 @@ export const Settings: React.FC = () => {
   const [tuyaExpanded, setTuyaExpanded] = useState(false);
   const [dpExpanded, setDpExpanded] = useState(false);
   const [backupExpanded, setBackupExpanded] = useState(false);
+  const [dbExpanded, setDbExpanded] = useState(false);
 
   // Tuya credentials state
   const [clientId, setClientId] = useState('');
@@ -47,7 +48,6 @@ export const Settings: React.FC = () => {
   const [powerDeviceId, setPowerDeviceId] = useState('');
   const [customProxyUrl, setCustomProxyUrl] = useState('');
   const [localTvBoxIp, setLocalTvBoxIp] = useState('');
-  const [bypassProxyForLocal, setBypassProxyForLocal] = useState(false);
 
   // Custom Device Names & Locations state
   const [tempName1, setTempName1] = useState('');
@@ -212,7 +212,6 @@ export const Settings: React.FC = () => {
         setPowerDeviceId(tuya.powerDeviceId || '');
         setCustomProxyUrl(tuya.customProxyUrl || '');
         setLocalTvBoxIp(tuya.localTvBoxIp || '');
-        setBypassProxyForLocal(tuya.bypassProxyForLocal || false);
 
         setTempName1(tuya.tempName1 || '');
         setTempLoc1(tuya.tempLoc1 || '');
@@ -261,8 +260,7 @@ export const Settings: React.FC = () => {
       tempLoc2: tempLoc2.trim(),
       powerName: powerName.trim(),
       powerLoc: powerLoc.trim(),
-      localTvBoxIp: localTvBoxIp.trim(),
-      bypassProxyForLocal
+      localTvBoxIp: localTvBoxIp.trim()
     };
 
     try {
@@ -447,21 +445,7 @@ export const Settings: React.FC = () => {
                     onChange={(e) => setLocalTvBoxIp(e.target.value)} 
                     style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px', marginBottom: '10px' }}
                   />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <input 
-                      type="checkbox" 
-                      id="bypass-proxy-checkbox"
-                      checked={bypassProxyForLocal} 
-                      onChange={(e) => setBypassProxyForLocal(e.target.checked)} 
-                      style={{ cursor: 'pointer', width: 'auto' }}
-                    />
-                    <label htmlFor="bypass-proxy-checkbox" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text)', cursor: 'pointer', userSelect: 'none' }}>
-                      Bypass CORS Proxy (Direct LAN Fetch)
-                    </label>
-                  </div>
-                  <p style={{ margin: '0 0 10px 0', fontSize: '11px', color: 'var(--color-warning)', lineHeight: '1.4' }}>
-                    <em>Note: Browsers block unsecure HTTP queries from HTTPS websites (Mixed Content). Check this box only if you are using a secure Cloudflare Tunnel HTTPS address, or if you configured your browser bypass flags (e.g. enable `chrome://flags/#unsafely-treat-insecure-origin-as-secure` and add this app's URL: <code>https://filip013.github.io</code>).</em>
-                  </p>
+
                   <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
                     <strong>Why use this?</strong> The Tuya Cloud API does not update active power in real-time unless the official Tuya app is actively open. Configuring a local TV Box IP allows the web application to stream instant sub-second updates directly from your Termux local TinyTuya server on your home network.
                   </p>
@@ -488,7 +472,7 @@ export const Settings: React.FC = () => {
                           onChange={(e) => setTempDeviceId1(e.target.value)} 
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px' }}
                         />
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div className="form-grid-2" style={{ gap: '8px' }}>
                           <input 
                             type="text" 
                             placeholder="Custom Sensor Name (e.g. Living Room)"
@@ -521,7 +505,7 @@ export const Settings: React.FC = () => {
                           onChange={(e) => setTempDeviceId2(e.target.value)} 
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px' }}
                         />
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div className="form-grid-2" style={{ gap: '8px' }}>
                           <input 
                             type="text" 
                             placeholder="Custom Sensor Name (e.g. Greenhouse)"
@@ -554,7 +538,7 @@ export const Settings: React.FC = () => {
                           onChange={(e) => setPowerDeviceId(e.target.value)} 
                           style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '13px' }}
                         />
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div className="form-grid-2" style={{ gap: '8px' }}>
                           <input 
                             type="text" 
                             placeholder="Custom Meter Name (e.g. Main Grid Meter)"
@@ -696,66 +680,78 @@ export const Settings: React.FC = () => {
               )}
             </section>
 
-            {/* History & Database Utilities */}
+            {/* History & Database Utilities (Collapsible) */}
             <section className="dashboard-card glass" aria-labelledby="db-utils-title">
-              <div className="card-header" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Database className="card-icon text-info" style={{ color: '#06b6d4' }} />
-                <h3 id="db-utils-title" style={{ margin: 0 }}>History & Database Utilities</h3>
-              </div>
-              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
-                <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', margin: 0, lineHeight: '1.4' }}>
-                  Use these tools to manually repair or synchronize your historical statistics stored in Firestore.
-                </p>
-
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Target Date:</span>
-                    <input 
-                      type="date"
-                      value={recalcDate}
-                      onChange={(e) => setRecalcDate(e.target.value)}
-                      max={getLocalYesterdayDateStr()}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--color-border)',
-                        backgroundColor: 'var(--color-card-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '13px',
-                        fontWeight: 600
-                      }}
-                    />
-                  </div>
-                  
-                  <button 
-                    type="button" 
-                    onClick={handleRecalculateDate} 
-                    className="btn secondary"
-                    disabled={recalcStatus === 'running'}
-                    style={{ fontSize: '13px', padding: '8px 16px' }}
-                  >
-                    {recalcStatus === 'running' && <RefreshCw size={14} className="animate-spin" style={{ marginRight: '8px', display: 'inline' }} />}
-                    Recalculate Historical Energy
-                  </button>
-                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                    Queries logs for the target Belgrade date (midnight to midnight) and rewrites the Firestore record.
-                  </span>
+              <div 
+                className="card-header" 
+                onClick={() => setDbExpanded(!dbExpanded)}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+              >
+                <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Database className="card-icon text-info" style={{ color: '#06b6d4' }} />
+                  <h3 id="db-utils-title" style={{ margin: 0 }}>History & Database Utilities</h3>
                 </div>
-
-                {recalcStatus !== 'idle' && (
-                  <div className={`alert-banner ${recalcStatus === 'success' ? 'success' : recalcStatus === 'error' ? 'warning' : 'info'}`} style={{ 
-                    backgroundColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.1)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)', 
-                    borderColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.2)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)', 
-                    color: recalcStatus === 'success' ? 'var(--color-secondary)' : recalcStatus === 'error' ? 'var(--color-danger)' : 'var(--color-text)',
-                    margin: 0
-                  }}>
-                    {recalcStatus === 'success' && <CheckCircle2 size={16} />}
-                    {recalcStatus === 'error' && <XCircle size={16} />}
-                    {recalcStatus === 'running' && <RefreshCw size={16} className="animate-spin" />}
-                    <span>{recalcMsg}</span>
-                  </div>
-                )}
+                <div className="text-muted" style={{ display: 'flex', alignItems: 'center' }}>
+                  {dbExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </div>
               </div>
+
+              {dbExpanded && (
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                  <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', margin: 0, lineHeight: '1.4' }}>
+                    Use these tools to manually repair or synchronize your historical statistics stored in Firestore.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Target Date:</span>
+                      <input 
+                        type="date"
+                        value={recalcDate}
+                        onChange={(e) => setRecalcDate(e.target.value)}
+                        max={getLocalYesterdayDateStr()}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--color-border)',
+                          backgroundColor: 'var(--color-card-bg)',
+                          color: 'var(--color-text)',
+                          fontSize: '13px',
+                          fontWeight: 600
+                        }}
+                      />
+                    </div>
+                    
+                    <button 
+                      type="button" 
+                      onClick={handleRecalculateDate} 
+                      className="btn secondary"
+                      disabled={recalcStatus === 'running'}
+                      style={{ fontSize: '13px', padding: '8px 16px' }}
+                    >
+                      {recalcStatus === 'running' && <RefreshCw size={14} className="animate-spin" style={{ marginRight: '8px', display: 'inline' }} />}
+                      Recalculate Historical Energy
+                    </button>
+                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                      Queries logs for the target Belgrade date (midnight to midnight) and rewrites the Firestore record.
+                    </span>
+                  </div>
+
+                  {recalcStatus !== 'idle' && (
+                    <div className={`alert-banner ${recalcStatus === 'success' ? 'success' : recalcStatus === 'error' ? 'warning' : 'info'}`} style={{ 
+                      backgroundColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.1)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(59, 130, 246, 0.1)', 
+                      borderColor: recalcStatus === 'success' ? 'rgba(16, 185, 129, 0.2)' : recalcStatus === 'error' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)', 
+                      color: recalcStatus === 'success' ? 'var(--color-secondary)' : recalcStatus === 'error' ? 'var(--color-danger)' : 'var(--color-text)',
+                      margin: 0
+                    }}>
+                      {recalcStatus === 'success' && <CheckCircle2 size={16} />}
+                      {recalcStatus === 'error' && <XCircle size={16} />}
+                      {recalcStatus === 'running' && <RefreshCw size={16} className="animate-spin" />}
+                      <span>{recalcMsg}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
 
             {/* Data Point (DP) Codes Config (Collapsible) */}

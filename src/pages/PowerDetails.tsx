@@ -160,8 +160,8 @@ export const PowerDetails: React.FC = () => {
             }
 
             let fetchUrl = `${localUrl}/live`;
-            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints, unless bypassed in settings)
-            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && !config.bypassProxyForLocal && config.customProxyUrl) {
+            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints)
+            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && config.customProxyUrl) {
               const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
                 ? config.customProxyUrl.trim().slice(0, -1) 
                 : config.customProxyUrl.trim();
@@ -489,9 +489,7 @@ export const PowerDetails: React.FC = () => {
   const isToday = selectedDate === today;
 
   // Selected Month Energy Total (dynamic based on selectedMonth)
-  const selectedMonthDays = powerData
-    ? powerData.dailyHistory.filter(d => d.date.startsWith(selectedMonth))
-    : [];
+  const selectedMonthDays = baseDailyHistory.filter(d => d.date.startsWith(selectedMonth));
   const selectedMonthEnergyTotal = Number(
     selectedMonthDays.reduce((acc, d) => acc + d.kwh, 0).toFixed(2)
   );
@@ -502,13 +500,11 @@ export const PowerDetails: React.FC = () => {
     : 0;
 
   // Selected Month Cost
-  const selectedMonthCostRSD = powerData
-    ? Number(
-        selectedMonthDays.reduce((acc, d) => {
-          return acc + calculateDailyCostRSD(d.kwh, d.hourly);
-        }, 0).toFixed(2)
-      )
-    : 0;
+  const selectedMonthCostRSD = Number(
+    selectedMonthDays.reduce((acc, d) => {
+      return acc + calculateDailyCostRSD(d.kwh, d.hourly);
+    }, 0).toFixed(2)
+  );
 
   // Selected Day Energy, Peak and Cost
   const selectedDayKwh = isToday

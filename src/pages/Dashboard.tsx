@@ -102,8 +102,8 @@ export const Dashboard: React.FC = () => {
 
             let fetchUrl = `${localUrl}/live`;
             let isProxied = false;
-            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints, unless bypassed in settings)
-            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && !config.bypassProxyForLocal && config.customProxyUrl) {
+            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints)
+            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && config.customProxyUrl) {
               const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
                 ? config.customProxyUrl.trim().slice(0, -1) 
                 : config.customProxyUrl.trim();
