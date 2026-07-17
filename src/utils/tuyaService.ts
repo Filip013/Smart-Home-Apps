@@ -155,6 +155,12 @@ export const getTuyaConfig = async (): Promise<TuyaConfig | null> => {
   return localData ? JSON.parse(localData) : null;
 };
 
+// Synchronous cached config reader to avoid making network requests in high-frequency loops
+export const getCachedTuyaConfig = (): TuyaConfig | null => {
+  const localData = localStorage.getItem('tuya_config');
+  return localData ? JSON.parse(localData) : null;
+};
+
 // Query daily energy history from Firestore collection
 export const fetchFirestoreDailyPowerStats = async (
   userId: string

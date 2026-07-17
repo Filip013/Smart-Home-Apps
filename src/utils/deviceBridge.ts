@@ -47,13 +47,11 @@ const scaleVoltage = (val: any): number => {
   return num > 1000 ? num / 10 : num;
 };
 
-// Standardize Current scaling
+// Standardize Current scaling (Tuya reports current in mA, so we divide by 1000 to get Amps)
 const scaleCurrent = (val: any): number => {
   const num = Number(val);
   if (isNaN(num)) return 0;
-  if (num > 1000) return num / 1000;
-  if (num > 100) return num / 100;
-  return num;
+  return num / 1000;
 };
 
 // Query actual 24h temperature logs from Tuya OpenAPI (paginating to ensure we get the full 24h of data)

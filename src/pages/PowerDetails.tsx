@@ -7,7 +7,7 @@ import {
   fetchRealDayClimateStats,
   fetchInstantPowerStats
 } from '../utils/deviceBridge';
-import { getTuyaConfig } from '../utils/tuyaService';
+import { getTuyaConfig, getCachedTuyaConfig } from '../utils/tuyaService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -150,7 +150,7 @@ export const PowerDetails: React.FC = () => {
       }
 
       try {
-        const config = await getTuyaConfig();
+        const config = getCachedTuyaConfig();
         if (!config) return;
 
         // 1. Try querying the local TV Box daemon if configured

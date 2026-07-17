@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
-import { getTuyaConfig } from '../utils/tuyaService';
+import { getTuyaConfig, getCachedTuyaConfig } from '../utils/tuyaService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
 import { 
@@ -90,7 +90,7 @@ export const Dashboard: React.FC = () => {
       }
 
       try {
-        const config = await getTuyaConfig();
+        const config = getCachedTuyaConfig();
         if (!config) return;
 
         // 1. Try querying the local TV Box daemon if configured

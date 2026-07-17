@@ -115,16 +115,37 @@ energy_code = config.get('energyCode', 'add_ele')
 
 if power_device_id:
     print(f"\nProcessing Energy Logs for device {power_device_id}...")
-    # Fetch energy logs for the last 24h (type=7 for DP Reports)
-    power_logs_res = make_tuya_request(
-        f"/v1.0/devices/{power_device_id}/logs?codes={energy_code}&start_time={start_time_ms}&end_time={end_time_ms}&size=100&type=7",
-        'GET',
-        None,
-        access_token
-    )
+    
+    # We will paginate to make sure we fetch all logs (up to 10 pages, 1000 logs)
+    logs = []
+    last_row_key = ''
+    has_more = True
+    page_count = 0
+    success = True
+    err_msg = ""
+    
+    while has_more and page_count < 10:
+        row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+        path = f"/v2.0/cloud/thing/{power_device_id}/report-logs?codes={energy_code}&start_time={start_time_ms}&end_time={end_time_ms}&size=100{row_key_param}"
+        res = make_tuya_request(path, 'GET', None, access_token)
+        
+        if not res.get('success'):
+            success = False
+            err_msg = res.get('msg', 'Unknown error')
+            break
+            
+        result_data = res.get('result', {})
+        page_logs = result_data.get('logs', [])
+        logs.extend(page_logs)
+        
+        has_more = result_data.get('has_more', False)
+        last_row_key = result_data.get('last_row_key', '')
+        page_count += 1
+        
+        if not page_logs or not last_row_key:
+            break
 
-    if power_logs_res.get('success'):
-        logs = power_logs_res.get('result', {}).get('logs', [])
+    if success:
         print(f"Retrieved {len(logs)} energy logs.")
         
         # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
@@ -260,17 +281,38 @@ if config.get('tempDeviceId2'):
 
 for sensor in sensors:
     print(f"\nProcessing Climate Logs for device {sensor['id']} ({sensor['key']})...")
-    # Fetch logs for temperature and humidity (type=7 for DP Reports)
     codes_str = f"{sensor['temp_code']},{sensor['hum_code']}"
-    climate_res = make_tuya_request(
-        f"/v1.0/devices/{sensor['id']}/logs?codes={codes_str}&start_time={start_time_ms}&end_time={end_time_ms}&size=100&type=7",
-        'GET',
-        None,
-        access_token
-    )
+    
+    # We will paginate to make sure we fetch all logs (up to 10 pages, 1000 logs)
+    logs = []
+    last_row_key = ''
+    has_more = True
+    page_count = 0
+    success = True
+    err_msg = ""
+    
+    while has_more and page_count < 10:
+        row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+        path = f"/v2.0/cloud/thing/{sensor['id']}/report-logs?codes={codes_str}&start_time={start_time_ms}&end_time={end_time_ms}&size=100{row_key_param}"
+        res = make_tuya_request(path, 'GET', None, access_token)
+        
+        if not res.get('success'):
+            success = False
+            err_msg = res.get('msg', 'Unknown error')
+            break
+            
+        result_data = res.get('result', {})
+        page_logs = result_data.get('logs', [])
+        logs.extend(page_logs)
+        
+        has_more = result_data.get('has_more', False)
+        last_row_key = result_data.get('last_row_key', '')
+        page_count += 1
+        
+        if not page_logs or not last_row_key:
+            break
 
-    if climate_res.get('success'):
-        logs = climate_res.get('result', {}).get('logs', [])
+    if success:
         print(f"Retrieved {len(logs)} climate logs.")
         
         # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
