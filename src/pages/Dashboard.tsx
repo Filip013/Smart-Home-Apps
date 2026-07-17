@@ -33,6 +33,7 @@ const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const [connStatus, setConnStatus] = useState<{ status: 'local' | 'proxy' | 'cloud' | 'error'; detail?: string }>({ status: 'cloud' });
   const [sensors, setSensors] = useState<TempSensor[]>([]);
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
@@ -97,12 +98,14 @@ export const Dashboard: React.FC = () => {
             }
 
             let fetchUrl = `${localUrl}/live`;
+            let isProxied = false;
             // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints)
             if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && config.customProxyUrl) {
               const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
                 ? config.customProxyUrl.trim().slice(0, -1) 
                 : config.customProxyUrl.trim();
               fetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
+              isProxied = true;
             }
 
             const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(1000) });
@@ -116,16 +119,21 @@ export const Dashboard: React.FC = () => {
                   currentAmps: live.currentAmps !== undefined ? Number(live.currentAmps) : prev.currentAmps
                 } : null);
                 isLocalOnline = true;
+                setConnStatus({ status: isProxied ? 'proxy' : 'local' });
                 return; // Local fetch succeeded, bypass cloud fallback query
               }
             }
-          } catch (localErr) {
+            throw new Error(`Server returned HTTP status ${response.status}`);
+          } catch (localErr: any) {
             // Local fetch failed (offline or away from home), fallback to cloud
             if (isLocalOnline) {
               console.warn("Local TV Box daemon went offline, falling back to Tuya Cloud:", localErr);
               isLocalOnline = false;
             }
+            setConnStatus({ status: 'error', detail: localErr.message || String(localErr) });
           }
+        } else {
+          setConnStatus({ status: 'cloud', detail: 'Local TV Box IP not configured in Settings' });
         }
 
         // 2. Cloud Fallback (query Cloud API only if local server is unconfigured/offline, and only query every 30s)
@@ -275,8 +283,34 @@ export const Dashboard: React.FC = () => {
       {/* Overview Banner / Hero section */}
       <section className="overview-hero glass" aria-label="System Quick Summary">
         <div className="hero-welcome">
-          <h2>Welcome Back</h2>
-          <p>Here is what's happening in your connected home today.</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+            <h2 style={{ margin: 0 }}>Welcome Back</h2>
+            <div className={`status-badge ${connStatus.status}`} style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '4px 10px',
+              borderRadius: '12px',
+              backgroundColor: connStatus.status === 'local' ? 'rgba(16, 185, 129, 0.12)' : connStatus.status === 'proxy' ? 'rgba(59, 130, 246, 0.12)' : connStatus.status === 'cloud' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              color: connStatus.status === 'local' ? '#10b981' : connStatus.status === 'proxy' ? '#3b82f6' : connStatus.status === 'cloud' ? '#f59e0b' : '#ef4444',
+              border: '1px solid currentColor',
+              lineHeight: '1.2'
+            }}>
+              <span style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: 'currentColor',
+                display: 'inline-block'
+              }}></span>
+              <span>
+                {connStatus.status === 'local' ? 'Live (LAN)' : connStatus.status === 'proxy' ? 'Live (Proxy)' : connStatus.status === 'cloud' ? 'Cloud Sync' : `Local Server Connection Failed: ${connStatus.detail}`}
+              </span>
+            </div>
+          </div>
+          <p style={{ margin: 0 }}>Here is what's happening in your connected home today.</p>
         </div>
         <div className="hero-stats">
           <div className="hero-stat-card">
