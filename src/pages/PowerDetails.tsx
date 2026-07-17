@@ -4,8 +4,10 @@ import {
   fetchAllDeviceData, 
   fetchRealDailyClimateStats,
   fetchRealDayPowerStats,
-  fetchRealDayClimateStats
+  fetchRealDayClimateStats,
+  fetchInstantPowerStats
 } from '../utils/deviceBridge';
+import { getTuyaConfig } from '../utils/tuyaService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -126,6 +128,128 @@ export const PowerDetails: React.FC = () => {
     };
     loadData();
   }, []);
+
+  // Periodic real-time power meter stats sync (Catering to Local TV Box IP vs Tuya Cloud Fallback)
+  useEffect(() => {
+    if (!powerData || mode !== 'live') return;
+
+    let intervalId: any = null;
+    let isLocalOnline = false;
+
+    const stopSync = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const runSync = async () => {
+      if (document.hidden) {
+        stopSync();
+        return;
+      }
+
+      try {
+        const config = await getTuyaConfig();
+        if (!config) return;
+
+        // 1. Try querying the local TV Box daemon if configured
+        if (config.localTvBoxIp) {
+          try {
+            // Standardize IP format (trim trailing slash and ensure protocol)
+            let localUrl = config.localTvBoxIp.trim();
+            if (!localUrl.startsWith('http://') && !localUrl.startsWith('https://')) {
+              localUrl = `http://${localUrl}`;
+            }
+            if (localUrl.endsWith('/')) {
+              localUrl = localUrl.slice(0, -1);
+            }
+
+            let fetchUrl = `${localUrl}/live`;
+            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy
+            if (window.location.protocol === 'https:' && config.customProxyUrl) {
+              const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
+                ? config.customProxyUrl.trim().slice(0, -1) 
+                : config.customProxyUrl.trim();
+              fetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
+            }
+
+            const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(1000) });
+            if (response.ok) {
+              const live = await response.json();
+              if (live && live.currentLoad !== undefined) {
+                setPowerData(prev => prev ? {
+                  ...prev,
+                  currentLoad: Number(live.currentLoad),
+                  voltage: live.voltage !== undefined ? Number(live.voltage) : prev.voltage,
+                  currentAmps: live.currentAmps !== undefined ? Number(live.currentAmps) : prev.currentAmps
+                } : null);
+                isLocalOnline = true;
+                return; // Local fetch succeeded, bypass cloud fallback query
+              }
+            }
+          } catch (localErr) {
+            // Local fetch failed (offline or away from home), fallback to cloud
+            if (isLocalOnline) {
+              console.warn("Local TV Box daemon went offline, falling back to Tuya Cloud:", localErr);
+              isLocalOnline = false;
+            }
+          }
+        }
+
+        // 2. Cloud Fallback (query Cloud API only if local server is unconfigured/offline, and only query every 30s)
+        const now = Date.now();
+        const lastCloudCall = (window as any)._lastCloudCall || 0;
+        if (now - lastCloudCall > 30000) {
+          (window as any)._lastCloudCall = now;
+          if (config.powerDeviceId) {
+            const instant = await fetchInstantPowerStats(config.powerDeviceId, {
+              powerCode: config.powerCode,
+              voltageCode: config.voltageCode,
+              currentCode: config.currentCode
+            });
+            if (instant) {
+              setPowerData(prev => prev ? {
+                ...prev,
+                currentLoad: instant.currentLoad,
+                voltage: instant.voltage,
+                currentAmps: instant.currentAmps
+              } : null);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error in real-time power metrics synchronization loop:", err);
+      }
+    };
+
+    const startSync = () => {
+      stopSync();
+      runSync();
+      // Poll every 1.0 second to achieve high-frequency real-time responsiveness when local is active!
+      intervalId = setInterval(runSync, 1000); 
+    };
+
+    // Initial setup if visible
+    if (!document.hidden) {
+      startSync();
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopSync();
+      } else {
+        startSync();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopSync();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [powerData === null, mode]);
 
   // Fetch past date stats from Firestore
   useEffect(() => {

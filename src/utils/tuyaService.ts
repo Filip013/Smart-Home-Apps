@@ -34,6 +34,7 @@ export interface TuyaConfig {
   tempLoc2?: string;
   powerName?: string;
   powerLoc?: string;
+  localTvBoxIp?: string; // Local IP address and port of the Termux daemon (e.g., http://192.168.1.15:8080)
 }
 
 // Simulation flag: set to true to force local dev server to use the production CORS proxy path
