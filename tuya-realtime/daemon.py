@@ -45,6 +45,22 @@ current_dps = str(config.get('current_dps_index', '18'))
 server_port = int(config.get('server_port', 8080))
 poll_interval = float(config.get('poll_interval_seconds', 1.5))
 
+# Load API secret for authorization
+api_secret = config.get('api_secret')
+if not api_secret:
+    # Try auto-detecting from tintuya.json or parent dirs
+    for path in ['./tintuya.json', '../tintuya.json', './tuya-realtime/tintuya.json']:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as tf:
+                    tdata = json.load(tf)
+                    api_secret = tdata.get('apiSecret') or tdata.get('api_secret')
+                    if api_secret:
+                        print(f"Auto-loaded API Authorization Secret from {path}")
+                        break
+            except Exception as te:
+                print(f"Warning: Failed to parse {path}: {te}")
+
 if device_id == "YOUR_TUYA_DEVICE_ID" or local_key == "YOUR_TUYA_LOCAL_KEY":
     print("Error: Please update config.json with your actual Tuya credentials.")
     sys.exit(1)
@@ -160,6 +176,18 @@ class LocalLiveServer(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/live':
+            # Check Authorization
+            if api_secret:
+                auth_header = self.headers.get('Authorization')
+                expected = f"Bearer {api_secret}"
+                if not auth_header or auth_header != expected:
+                    self.send_response(401)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "Unauthorized"}).encode('utf-8'))
+                    return
+
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             # Enable CORS so the React app can fetch from local IP

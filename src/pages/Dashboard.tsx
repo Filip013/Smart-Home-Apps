@@ -111,7 +111,15 @@ export const Dashboard: React.FC = () => {
               isProxied = true;
             }
 
-            const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(1000) });
+            const headers: HeadersInit = {};
+            if (config.clientSecret) {
+              headers['Authorization'] = `Bearer ${config.clientSecret}`;
+            }
+
+            const response = await fetch(fetchUrl, { 
+              headers,
+              signal: AbortSignal.timeout(1000) 
+            });
             if (response.ok) {
               const live = await response.json();
               if (live && live.currentLoad !== undefined) {
