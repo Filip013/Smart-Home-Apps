@@ -118,7 +118,7 @@ export const Dashboard: React.FC = () => {
 
             const response = await fetch(fetchUrl, { 
               headers,
-              signal: AbortSignal.timeout(1000) 
+              signal: AbortSignal.timeout(2000) 
             });
             if (response.ok) {
               const live = await response.json();

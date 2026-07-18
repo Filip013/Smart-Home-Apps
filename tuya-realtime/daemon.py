@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import threading
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import tinytuya
 
@@ -20,7 +21,7 @@ DEFAULT_CONFIG = {
     "voltage_dps_index": "20",
     "current_dps_index": "18",
     "server_port": 8080,
-    "poll_interval_seconds": 1.0
+    "poll_interval_seconds": 1.0 
 }
 
 # Load configuration file
@@ -43,18 +44,16 @@ power_dps = str(config.get('power_dps_index', '19'))
 voltage_dps = str(config.get('voltage_dps_index', '20'))
 current_dps = str(config.get('current_dps_index', '18'))
 server_port = int(config.get('server_port', 8080))
-poll_interval = float(config.get('poll_interval_seconds', 1.5))
+
+# We use this as a minimum time between physical device queries to prevent overwhelming the plug
+CACHE_TTL = float(config.get('poll_interval_seconds', 1.0))
 
 # Load API secret for authorization
 api_secret = config.get('api_secret')
 if not api_secret:
-    # Try auto-detecting from tinytuya.json in various locations
     search_paths = [
-        './tinytuya.json',
-        '../tinytuya.json',
-        '../../tinytuya.json',
-        './tuya-realtime/tinytuya.json',
-        os.path.expanduser('~/tinytuya.json'),
+        './tinytuya.json', '../tinytuya.json', '../../tinytuya.json',
+        './tuya-realtime/tinytuya.json', os.path.expanduser('~/tinytuya.json'),
         os.path.expanduser('~/scripts/tinytuya.json')
     ]
     for path in search_paths:
@@ -78,16 +77,6 @@ if device_id == "YOUR_TUYA_DEVICE_ID" or local_key == "YOUR_TUYA_LOCAL_KEY":
     print("Error: Please update config.json with your actual Tuya credentials.")
     sys.exit(1)
 
-# Thread-safe global store for the latest reading
-live_state_lock = threading.Lock()
-latest_live_state = {
-    "currentLoad": 0.0,
-    "voltage": 0.0,
-    "currentAmps": 0.0,
-    "status": "offline",
-    "timestamp": 0
-}
-
 # Initialize TinyTuya outlet device
 print(f"Initializing TinyTuya for Device {device_id[:6]}... at {device_ip}")
 device = tinytuya.OutletDevice(
@@ -96,81 +85,81 @@ device = tinytuya.OutletDevice(
     local_key=local_key
 )
 device.set_version(protocol_version)
-device.set_socketPersistent(True)  # Reuse socket for lower latency and better stability
-device.timeout = 1.0                # Short timeout to prevent thread blocking on network lag
+# Keep socket persistent so on-demand queries respond instantly instead of taking 1-2 seconds to handshake
+device.set_socketPersistent(True) 
+device.timeout = 1.0 
 
-# Background thread to poll the Tuya device locally
-def polling_worker():
-    global latest_live_state
-    print("Started background local polling thread...")
-    consecutive_errors = 0
-    
-    while True:
+# Thread-safe lock and cache for on-demand requests
+device_lock = threading.Lock()
+last_fetch_time = 0
+cached_state = {
+    "currentLoad": 0.0,
+    "voltage": 0.0,
+    "currentAmps": 0.0,
+    "status": "offline",
+    "timestamp": 0
+}
+
+def fetch_device_data():
+    """Queries the physical Tuya device. Must be called inside device_lock."""
+    # Force the device to refresh and send its live values
+    dps_indices = []
+    if power_dps.isdigit(): dps_indices.append(int(power_dps))
+    if voltage_dps.isdigit(): dps_indices.append(int(voltage_dps))
+    if current_dps.isdigit(): dps_indices.append(int(current_dps))
+
+    for attempt in range(2):
         try:
-            # Force the device to refresh and send its live values (otherwise Tuya plugs cache them)
-            try:
-                dps_indices = []
-                if power_dps.isdigit(): dps_indices.append(int(power_dps))
-                if voltage_dps.isdigit(): dps_indices.append(int(voltage_dps))
-                if current_dps.isdigit(): dps_indices.append(int(current_dps))
-                if dps_indices:
+            if dps_indices:
+                try:
                     device.updatedps(index=dps_indices)
-            except Exception as update_err:
-                pass
+                except Exception:
+                    pass # Ignore update errors, proceed to status check
 
             # Query local status
             data = device.status()
-            
+
             if 'error' in data:
                 raise Exception(f"Local query error: {data['error']}")
-                
+
             dps = data.get('dps', {})
-            
-            # Extract raw values
             raw_power = dps.get(power_dps)
             raw_voltage = dps.get(voltage_dps)
             raw_current = dps.get(current_dps)
-            
+
             if raw_power is not None:
-                # Convert tenths of W -> W (e.g. 125 -> 12.5 W)
-                power_w = round(float(raw_power) / 10.0, 1)
-                # Convert tenths of V -> V (e.g. 2300 -> 230.0 V)
-                voltage_v = round(float(raw_voltage) / 10.0, 1) if raw_voltage is not None else 230.0
-                # Convert mA -> A (e.g. 120 -> 0.12 A)
-                current_a = round(float(raw_current) / 1000.0, 2) if raw_current is not None else 0.0
-                
-                with live_state_lock:
-                    latest_live_state = {
-                        "currentLoad": power_w,
-                        "voltage": voltage_v,
-                        "currentAmps": current_a,
-                        "status": "online",
-                        "timestamp": int(time.time())
-                    }
-                
-                consecutive_errors = 0
-                # Log to terminal (optional, comment out if output is too verbose)
-                # print(f" polled: {power_w}W, {voltage_v}V, {current_a}A")
+                return {
+                    "currentLoad": round(float(raw_power) / 10.0, 1),
+                    "voltage": round(float(raw_voltage) / 10.0, 1) if raw_voltage is not None else 230.0,
+                    "currentAmps": round(float(raw_current) / 1000.0, 2) if raw_current is not None else 0.0,
+                    "status": "online",
+                    "timestamp": int(time.time())
+                }
             else:
-                print(f"Warning: Power DPS index '{power_dps}' not found in status. Available DPS keys: {list(dps.keys())}")
-                
+                raise Exception(f"Power DPS {power_dps} missing from payload. Available: {list(dps.keys())}")
+
         except Exception as e:
-            consecutive_errors += 1
-            print(f"Device Query Error: {e}")
-            with live_state_lock:
-                latest_live_state["status"] = "offline"
-            
-            # Close connection to force socket recreation on next poll
+            print(f"Device Query Attempt {attempt + 1} Failed: {e}")
+            # Close connection to force socket recreation on the next attempt
             try:
                 device.close()
             except:
                 pass
-                
-            # Back off sleep on consecutive errors
-            time.sleep(min(poll_interval * 3, 5.0))
-            continue
             
-        time.sleep(poll_interval)
+            # If this was the first attempt, retry immediately
+            if attempt == 0:
+                print("Retrying query with a fresh socket...")
+                continue
+                
+            # Both attempts failed, return the offline payload
+            return {
+                "currentLoad": 0.0,
+                "voltage": 0.0,
+                "currentAmps": 0.0,
+                "status": "offline",
+                "timestamp": int(time.time()),
+                "error": str(e)
+            }
 
 # HTTP Request Handler to serve live data to the browser
 class LocalLiveServer(BaseHTTPRequestHandler):
@@ -192,8 +181,7 @@ class LocalLiveServer(BaseHTTPRequestHandler):
             # Check Authorization
             if api_secret:
                 auth_header = self.headers.get('Authorization')
-                expected = f"Bearer {api_secret}"
-                if not auth_header or auth_header != expected:
+                if not auth_header or auth_header != f"Bearer {api_secret}":
                     self.send_response(401)
                     self.send_header('Content-Type', 'application/json')
                     self.send_header('Access-Control-Allow-Origin', '*')
@@ -201,31 +189,57 @@ class LocalLiveServer(BaseHTTPRequestHandler):
                     self.wfile.write(json.dumps({"error": "Unauthorized"}).encode('utf-8'))
                     return
 
+            global last_fetch_time, cached_state
+
+            # We use a lock here to prevent two simultaneous HTTP requests 
+            # from querying the plug at the exact same millisecond.
+            with device_lock:
+                current_time = time.time()
+                
+                # ON-DEMAND QUERY: Only poll the physical device if the cache has expired.
+                # (Prevents DoS'ing the plug if the web app sends rapid requests)
+                if current_time - last_fetch_time >= CACHE_TTL:
+                    cached_state = fetch_device_data()
+                    last_fetch_time = current_time
+
+                response_data = json.dumps(cached_state)
+
+            # Send HTTP Response
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
-            # Enable CORS so the React app can fetch from local IP
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            
-            with live_state_lock:
-                response_data = json.dumps(latest_live_state)
-                
             self.wfile.write(response_data.encode('utf-8'))
         else:
             self.send_response(404)
             self.end_headers()
 
+def get_local_ip():
+    """Gets the local IP address of the machine running the script."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Doesn't have to be reachable, just helps the OS determine the primary network interface
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
+
 def run_server():
-    # Start the polling worker thread
-    t = threading.Thread(target=polling_worker, daemon=True)
-    t.start()
-    
     server_address = ('', server_port)
     httpd = ThreadingHTTPServer(server_address, LocalLiveServer)
-    print(f"Server listening locally on port {server_port}...")
-    print(f"Web app should fetch from: http://<tv-box-ip>:{server_port}/live")
-    print("Press Ctrl+C to terminate.")
     
+    local_ip = get_local_ip()
+    
+    print(f"Server listening locally on port {server_port}...")
+    print("Running in ON-DEMAND mode (Silent until requested).")
+    print("-" * 50)
+    print(f"Web app should fetch from: http://{local_ip}:{server_port}/live")
+    print("-" * 50)
+    print("Press Ctrl+C to terminate.")
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
