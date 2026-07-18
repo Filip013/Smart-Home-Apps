@@ -48,18 +48,31 @@ poll_interval = float(config.get('poll_interval_seconds', 1.5))
 # Load API secret for authorization
 api_secret = config.get('api_secret')
 if not api_secret:
-    # Try auto-detecting from tintuya.json or parent dirs
-    for path in ['./tintuya.json', '../tintuya.json', './tuya-realtime/tintuya.json']:
+    # Try auto-detecting from tinytuya.json in various locations
+    search_paths = [
+        './tinytuya.json',
+        '../tinytuya.json',
+        '../../tinytuya.json',
+        './tuya-realtime/tinytuya.json',
+        os.path.expanduser('~/tinytuya.json'),
+        os.path.expanduser('~/scripts/tinytuya.json')
+    ]
+    for path in search_paths:
         if os.path.exists(path):
             try:
                 with open(path, 'r') as tf:
                     tdata = json.load(tf)
                     api_secret = tdata.get('apiSecret') or tdata.get('api_secret')
                     if api_secret:
-                        print(f"Auto-loaded API Authorization Secret from {path}")
+                        print(f"Auto-loaded API Authorization Secret from: {os.path.abspath(path)}")
                         break
             except Exception as te:
                 print(f"Warning: Failed to parse {path}: {te}")
+
+if api_secret:
+    print("Authorization status: ACTIVE (Matching Bearer token required for /live)")
+else:
+    print("Warning: No api_secret loaded. Local endpoint /live is UNPROTECTED.")
 
 if device_id == "YOUR_TUYA_DEVICE_ID" or local_key == "YOUR_TUYA_LOCAL_KEY":
     print("Error: Please update config.json with your actual Tuya credentials.")
