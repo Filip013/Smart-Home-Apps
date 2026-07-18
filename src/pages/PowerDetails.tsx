@@ -268,19 +268,18 @@ export const PowerDetails: React.FC = () => {
   useEffect(() => {
     const loadDayHistory = async () => {
       const today = getLocalTodayDateStr();
-      if (selectedDate === today) {
-        setHistoricalPowerDay(null);
-        setHistoricalClimateDay(null);
-        return;
-      }
-      
       setHistoricalLoading(true);
       try {
         if (mode === 'live') {
           const powerDay = await fetchRealDayPowerStats(selectedDate);
-          const climateDay = await fetchRealDayClimateStats(selectedDate);
           setHistoricalPowerDay(powerDay);
-          setHistoricalClimateDay(climateDay);
+
+          if (selectedDate === today) {
+            setHistoricalClimateDay(null);
+          } else {
+            const climateDay = await fetchRealDayClimateStats(selectedDate);
+            setHistoricalClimateDay(climateDay);
+          }
         } else {
           // Generate mock single day history for demo mode
           const mockHourlyPower = Array.from({ length: 24 }).map(() => Number((0.2 + Math.random() * 1.5).toFixed(3)));
@@ -478,12 +477,27 @@ export const PowerDetails: React.FC = () => {
     : 0;
 
   // 5. Map Single Day Historical Chart Arrays
-  const historicalHourlyPowerData = historicalPowerDay?.hourly
-    ? historicalPowerDay.hourly.map((kwh: number, hour: number) => ({
-        time: `${hour.toString().padStart(2, '0')}:00`,
-        kwh
-      }))
-    : [];
+  let baseHourlyPower = historicalPowerDay?.hourly ? [...historicalPowerDay.hourly] : Array(24).fill(0);
+  
+  // If the selected date is today, and we have live todayKwh, we can merge the live current hour's usage
+  if (selectedDate === today && powerData && powerData.todayKwh !== undefined) {
+    const currentHour = new Date().getHours();
+    
+    // Calculate the sum of all hours *except* the current and future hours
+    let recordedSum = 0;
+    for (let h = 0; h < currentHour; h++) {
+      recordedSum += baseHourlyPower[h] || 0;
+    }
+    
+    // The difference between the live total and the sum of previous hours is the current hour's usage!
+    const currentHourKwh = Math.max(0, powerData.todayKwh - recordedSum);
+    baseHourlyPower[currentHour] = Number(currentHourKwh.toFixed(3));
+  }
+
+  const historicalHourlyPowerData = baseHourlyPower.map((kwh: number, hour: number) => ({
+    time: `${hour.toString().padStart(2, '0')}:00`,
+    kwh
+  }));
 
   const historicalHourlyClimateData = historicalClimateDay?.sensors?.[selectedSensorKey]?.hourly
     ? historicalClimateDay.sensors[selectedSensorKey].hourly
@@ -715,7 +729,7 @@ export const PowerDetails: React.FC = () => {
               <Activity className="card-icon text-accent" />
               <h3 id="consumption-chart-title">
                 {timeRange === '24h' 
-                  ? (selectedDate === today ? '24-Hour Load Curve (Active Power)' : `Hourly Power Profile: ${formatChartDate(selectedDate)}`)
+                  ? `Hourly Power Profile: ${formatChartDate(selectedDate)}`
                   : `Monthly Power Consumption: ${selectedMonth}`}
               </h3>
             </div>
@@ -727,29 +741,16 @@ export const PowerDetails: React.FC = () => {
                 <span>Fetching archive from Firestore...</span>
               </div>
             ) : timeRange === '24h' ? (
-              selectedDate === today ? (
-                <LineAreaChart 
-                  data={powerData.hourlyHistory} 
-                  xKey="time" 
-                  yKey="loadWatts"
-                  yLabel="Active Load"
-                  color="var(--color-accent)"
-                  fillColor="url(#gradient-cyan)"
-                  height={260}
-                  valueSuffix=" W"
-                />
-              ) : (
-                <LineAreaChart 
-                  data={historicalHourlyPowerData} 
-                  xKey="time" 
-                  yKey="kwh"
-                  yLabel="Hourly Energy"
-                  color="var(--color-primary)"
-                  fillColor="url(#gradient-indigo)"
-                  height={260}
-                  valueSuffix=" kWh"
-                />
-              )
+              <LineAreaChart 
+                data={historicalHourlyPowerData} 
+                xKey="time" 
+                yKey="kwh"
+                yLabel="Hourly Energy"
+                color="var(--color-primary)"
+                fillColor="url(#gradient-indigo)"
+                height={260}
+                valueSuffix=" kWh"
+              />
             ) : (
               <BarChart 
                 data={powerDailyData} 
