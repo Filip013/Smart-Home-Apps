@@ -191,18 +191,22 @@ class LocalLiveServer(BaseHTTPRequestHandler):
 
             global last_fetch_time, cached_state
 
-            # We use a lock here to prevent two simultaneous HTTP requests 
-            # from querying the plug at the exact same millisecond.
-            with device_lock:
-                current_time = time.time()
-                
-                # ON-DEMAND QUERY: Only poll the physical device if the cache has expired.
-                # (Prevents DoS'ing the plug if the web app sends rapid requests)
-                if current_time - last_fetch_time >= CACHE_TTL:
-                    cached_state = fetch_device_data()
-                    last_fetch_time = current_time
+            current_time = time.time()
+            if current_time - last_fetch_time >= CACHE_TTL:
+                # Attempt to acquire the lock to fetch new data.
+                # If another request thread is already querying the plug, we don't block;
+                # we immediately serve the last known cached state to prevent request queuing.
+                acquired = device_lock.acquire(blocking=False)
+                if acquired:
+                    try:
+                        # Double-check freshness inside the lock
+                        if time.time() - last_fetch_time >= CACHE_TTL:
+                            cached_state = fetch_device_data()
+                            last_fetch_time = time.time()
+                    finally:
+                        device_lock.release()
 
-                response_data = json.dumps(cached_state)
+            response_data = json.dumps(cached_state)
 
             # Send HTTP Response
             self.send_response(200)
