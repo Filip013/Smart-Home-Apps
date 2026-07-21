@@ -52,9 +52,9 @@ domain_map = {
 }
 target_domain = domain_map.get(region_code, 'openapi.tuyaeu.com')
 
-# sliding window setup (Last 13 Hours in UTC to avoid Tuya's older corrupted/zero values)
+# sliding window setup (Last 48 Hours in UTC to capture full 24h of yesterday and today so far)
 end_time_ms = int(datetime.utcnow().timestamp() * 1000)
-start_time_ms = end_time_ms - 13 * 60 * 60 * 1000
+start_time_ms = end_time_ms - 48 * 60 * 60 * 1000
 
 print(f"Sliding query window (UTC): {datetime.utcfromtimestamp(start_time_ms/1000.0)} to {datetime.utcfromtimestamp(end_time_ms/1000.0)}")
 
@@ -160,73 +160,17 @@ if power_device_id:
             
         for date_str, date_logs in logs_by_date.items():
             print(f"Merging Energy history for Date: {date_str} ({len(date_logs)} logs)")
-            sorted_logs = sorted(date_logs, key=lambda x: int(x['event_time']))
             
-            # Detect if cumulative or incremental (add_ele is always incremental)
-            is_cumulative = True
-            if energy_code == 'add_ele':
-                is_cumulative = False
-            else:
-                last_val = -1
-                for log in sorted_logs:
-                    val = float(log['value'])
-                    if last_val != -1 and val < last_val:
-                        is_cumulative = False
-                        break
-                    last_val = val
-                
-            # Scale is 1000.0 for add_ele (thousandths of a kWh)
-            scale = 1000.0
-
-            # Get existing document from Firestore to merge
-            energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
-            energy_doc = energy_ref.get()
-            
-            if energy_doc.exists:
-                doc_data = energy_doc.to_dict()
-                start_val = doc_data.get('start_val', 0.0)
-                last_readings = doc_data.get('last_readings', [0.0] * 24)
-                hourly_kwh = doc_data.get('hourly', [0.0] * 24)
-            else:
-                start_val = 0.0
-                last_readings = [0.0] * 24
-                hourly_kwh = [0.0] * 24
-
-            # Group date logs by hour
-            by_hour = {h: [] for h in range(24)}
-            for log in sorted_logs:
+            # Group date logs by Belgrade hour
+            by_hour = [0.0] * 24
+            for log in date_logs:
                 dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
                 dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
-                by_hour[dt_local.hour].append(float(log['value']))
+                by_hour[dt_local.hour] += float(log['value'])
 
-            if is_cumulative:
-                if start_val == 0.0 and len(sorted_logs) > 0:
-                    start_val = float(sorted_logs[0]['value'])
-                
-                # Update last readings for active hours
-                current_reading = start_val
-                for h in range(24):
-                    if len(by_hour[h]) > 0:
-                        last_readings[h] = by_hour[h][-1]
-                    elif last_readings[h] == 0.0:
-                        if h > 0:
-                            last_readings[h] = last_readings[h-1]
-                        else:
-                            last_readings[h] = start_val
-
-                # Calculate cumulative consumption per hour
-                prev_val = start_val
-                for h in range(24):
-                    diff = max(0.0, last_readings[h] - prev_val)
-                    hourly_kwh[h] = round(diff / scale, 3)
-                    prev_val = last_readings[h]
-            else:
-                # Incremental: overwrite hours with new data
-                for h in range(24):
-                    if len(by_hour[h]) > 0:
-                        hourly_kwh[h] = round(sum(by_hour[h]) / scale, 3)
-
-            kwh = round(sum(hourly_kwh), 1)
+            # Convert thousandths of kWh (add_ele scale = 1000.0) to kWh
+            hourly_kwh = [round(v / 1000.0, 3) for v in by_hour]
+            kwh = round(sum(hourly_kwh), 2)
             
             # Calculate cost using High/Low Tariff schedule in RSD:
             # Low Tariff (Night): 00:00 to 07:59 -> 4.15 RSD/kWh
@@ -240,23 +184,24 @@ if power_device_id:
                     cost += h_kwh * 13.45
             cost = round(cost, 2)
             
-            # Peak kW estimation
-            peak_kw = round(max(hourly_kwh) * 4 if len(hourly_kwh) > 0 else kwh * 0.15, 1)
+            # Peak kW estimation (highest hour * 4)
+            peak_kw = round(max(hourly_kwh) * 4.0, 1) if len(hourly_kwh) > 0 else 0.0
 
-            print(f"Calculated -> Total kWh: {kwh}, Cost: {cost}")
+            print(f"Calculated -> Total kWh: {kwh}, Cost: {cost} RSD, Peak: {peak_kw} kW")
 
             # Save merged record to Firestore
+            energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
             energy_ref.set({
                 'kwh': kwh,
                 'peakKw': peak_kw,
                 'cost': cost,
-                'start_val': start_val,
-                'last_readings': last_readings,
+                'start_val': 0.0,
+                'last_readings': [0.0] * 24,
                 'hourly': hourly_kwh
-            })
+            }, merge=True)
             print(f"Saved merged energy history to Firestore for date '{date_str}'.")
     else:
-        print(f"Error fetching Tuya power logs: {power_logs_res.get('msg')}")
+        print(f"Error fetching Tuya power logs: {err_msg}")
 else:
     print("\nSkipping power history: No power meter device ID configured.")
 
