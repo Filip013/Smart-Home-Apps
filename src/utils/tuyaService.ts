@@ -47,10 +47,6 @@ const constructFetchUrl = (
   path: string,
   headers?: Record<string, string>
 ): string => {
-  if (!FORCE_PRODUCTION_PROXY && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    return `/tuya-${region}${path}`;
-  }
-  
   const domainMap: Record<string, string> = {
     'us': 'openapi.tuyaus.com',
     'eu': 'openapi.tuyaeu.com',
@@ -70,6 +66,10 @@ const constructFetchUrl = (
     // With a custom Cloudflare Worker proxy, we don't need reqHeaders/resHeaders hacks
     // because the Worker is programmed to forward all incoming headers directly!
     return `${customProxyUrl}?url=${encodeURIComponent(targetUrl)}&_cb=${Date.now()}`;
+  }
+
+  if (!FORCE_PRODUCTION_PROXY && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return `/tuya-${region}${path}`;
   }
   
   // Custom CORS preflight request headers allowed by corsproxy.io
