@@ -307,6 +307,43 @@ export const Dashboard: React.FC = () => {
         : powerData.monthKwh * 10.66)
     : 0;
 
+  // Calculate real standby load (lowest non-zero load recorded in past 24h, or 8% fallback)
+  const realStandbyWatts = powerData && powerData.hourlyHistory.length > 0
+    ? (Math.min(...powerData.hourlyHistory.map(h => h.loadWatts).filter(w => w > 0)) || Math.round(powerData.currentLoad * 0.08))
+    : (powerData ? Math.round(powerData.currentLoad * 0.08) : 0);
+
+  // Generate real dynamic insights from connected sensors
+  const dynamicCoachTips: string[] = [];
+  if (powerData && powerData.hourlyHistory.length > 0) {
+    const peakWatts = Math.max(...powerData.hourlyHistory.map(h => h.loadWatts), powerData.currentLoad);
+    dynamicCoachTips.push(`⚡ Peak grid demand reached ${peakWatts} W in the past 24h.`);
+  }
+
+  sensors.forEach(s => {
+    if (s.id.includes('greenhouse') || s.name.toLowerCase().includes('greenhouse')) {
+      if (s.currentTemp > 28) {
+        dynamicCoachTips.push(`🌡️ ${s.name} temp is elevated (${s.currentTemp}°C). Consider venting.`);
+      } else {
+        dynamicCoachTips.push(`🌡️ ${s.name} climate is optimal (${s.currentTemp}°C, ${s.currentHumidity}% humidity).`);
+      }
+    } else if (s.currentHumidity > 70) {
+      dynamicCoachTips.push(`💧 High humidity detected in ${s.name} (${s.currentHumidity}%). Ensure ventilation.`);
+    }
+  });
+
+  const lowestBatSensor = sensors.length > 0 ? sensors.reduce((min, s) => s.battery < min.battery ? s : min, sensors[0]) : null;
+  if (lowestBatSensor) {
+    if (lowestBatSensor.battery < 30) {
+      dynamicCoachTips.push(`🔋 ${lowestBatSensor.name} battery is low (${lowestBatSensor.battery}%). Replace soon.`);
+    } else {
+      dynamicCoachTips.push(`🔋 All sensor batteries healthy (lowest: ${lowestBatSensor.name} at ${lowestBatSensor.battery}%).`);
+    }
+  }
+
+  if (dynamicCoachTips.length === 0) {
+    dynamicCoachTips.push("💡 Turn off standby electronics when not in use to optimize daily power usage.");
+  }
+
   // Get greenhouse alerts
   const greenhouse = sensors.find(s => s.id === 'temp-greenhouse');
   const showGreenhouseAlert = greenhouse && greenhouse.currentTemp > 29.5;
@@ -421,7 +458,7 @@ export const Dashboard: React.FC = () => {
 
               <div className="realtime-metrics">
                 <div className="metric-row">
-                  <span className="metric-name">Today's Usage</span>
+                  <span className="metric-name">24h Usage</span>
                   <span className="metric-val">{powerData.todayKwh} kWh</span>
                 </div>
                 <div className="metric-row">
@@ -635,11 +672,11 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div className="tips-content">
-            <p>{powerData ? <>Your standby load is currently <strong>{Math.round(powerData.currentLoad * 0.08)} Watts</strong> (about 8% of your average load).</> : "Connect your smart power meter to receive active energy efficiency coaching recommendations."}</p>
+            <p>{powerData ? <>Your estimated standby load is <strong>{realStandbyWatts} Watts</strong> based on 24h minimum power draw.</> : "Connect your smart power meter to receive active energy efficiency coaching recommendations."}</p>
             <ul className="tips-list">
-              <li>💡 Turn off large media systems when sleeping to save ~45W standby power.</li>
-              <li>🌡️ Greenhouse temperature is climbing. Consider venting it to prevent overheating.</li>
-              <li>🔋 Living Room sensor battery is at 88% - no action required for ~6 months.</li>
+              {dynamicCoachTips.map((tip, idx) => (
+                <li key={idx}>{tip}</li>
+              ))}
             </ul>
           </div>
         </section>

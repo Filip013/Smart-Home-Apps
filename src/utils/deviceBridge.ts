@@ -101,40 +101,40 @@ export const fetchRealTempHistory = async (
     if (allLogs.length === 0) return [];
     const logs = allLogs;
 
-    // Group logs into hourly buckets
-    const hourlyData: { [hour: string]: { temps: number[]; hums: number[] } } = {};
+    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
     const now = new Date();
+    const buckets: { hourStr: string; startMs: number; endMs: number; temps: number[]; hums: number[] }[] = [];
+    
     for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 60 * 60 * 1000);
       const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      hourlyData[hourStr] = { temps: [], hums: [] };
+      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
+      const endMs = startMs + 60 * 60 * 1000;
+      buckets.push({ hourStr, startMs, endMs, temps: [], hums: [] });
     }
 
     // Response logs contain event_time in milliseconds (13 digits)
     logs.forEach((log: any) => {
-      const d = new Date(Number(log.event_time));
-      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      if (hourlyData[hourStr]) {
+      const eventMs = Number(log.event_time);
+      const bucket = buckets.find(b => eventMs >= b.startMs && eventMs < b.endMs);
+      if (bucket) {
         if (log.code === tCode) {
-          hourlyData[hourStr].temps.push(scaleTemp(log.value));
+          bucket.temps.push(scaleTemp(log.value));
         } else if (log.code === hCode) {
-          hourlyData[hourStr].hums.push(scaleHumidity(log.value));
+          bucket.hums.push(scaleHumidity(log.value));
         }
       }
     });
 
-    return Object.keys(hourlyData).map(hour => {
-      const bucket = hourlyData[hour];
-      return {
-        time: hour,
-        temp: bucket.temps.length > 0 
-          ? Number((bucket.temps.reduce((a, b) => a + b, 0) / bucket.temps.length).toFixed(1))
-          : 0,
-        humidity: bucket.hums.length > 0 
-          ? Math.round(bucket.hums.reduce((a, b) => a + b, 0) / bucket.hums.length)
-          : 0
-      };
-    });
+    return buckets.map(b => ({
+      time: b.hourStr,
+      temp: b.temps.length > 0 
+        ? Number((b.temps.reduce((a, b) => a + b, 0) / b.temps.length).toFixed(1))
+        : 0,
+      humidity: b.hums.length > 0 
+        ? Math.round(b.hums.reduce((a, b) => a + b, 0) / b.hums.length)
+        : 0
+    }));
   } catch (error) {
     console.error("Error fetching real temperature history:", error);
     return [];
@@ -236,30 +236,33 @@ export const fetchRealPowerHistory = async (
     if (allLogs.length === 0) return [];
     const pLogs = allLogs;
 
-    const hourlyData: { [hour: string]: number[] } = {};
+    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
     const now = new Date();
+    const buckets: { hourStr: string; startMs: number; endMs: number; loads: number[] }[] = [];
+    
     for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 60 * 60 * 1000);
       const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      hourlyData[hourStr] = [];
+      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
+      const endMs = startMs + 60 * 60 * 1000;
+      buckets.push({ hourStr, startMs, endMs, loads: [] });
     }
 
     pLogs.forEach((log: any) => {
-      const d = new Date(Number(log.event_time));
-      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      if (hourlyData[hourStr]) {
-        hourlyData[hourStr].push(Math.round(scalePower(log.value)));
+      const eventMs = Number(log.event_time);
+      const bucket = buckets.find(b => eventMs >= b.startMs && eventMs < b.endMs);
+      if (bucket) {
+        bucket.loads.push(Math.round(scalePower(log.value)));
       }
     });
 
-    return Object.keys(hourlyData).map(hour => {
-      const loads = hourlyData[hour];
-      const avgLoad = loads.length > 0 
-        ? Math.round(loads.reduce((a, b) => a + b, 0) / loads.length)
+    return buckets.map(b => {
+      const avgLoad = b.loads.length > 0 
+        ? Math.round(b.loads.reduce((a, b) => a + b, 0) / b.loads.length)
         : 0;
 
       return {
-        time: hour,
+        time: b.hourStr,
         loadWatts: avgLoad,
         voltage: avgLoad > 0 ? 230 : 0,
         currentAmps: avgLoad > 0 ? Number((avgLoad / 230).toFixed(2)) : 0
@@ -353,15 +356,15 @@ export const fetchLivePowerMeter = async (
     const currentLoad = powerStatus ? Number(scalePower(powerStatus.value).toFixed(1)) : 0;
     const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
     const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
-    // Calculate today's total kWh by summing add_ele logs from midnight to now
+    // Calculate past 24 hours total kWh by summing add_ele logs from 24h ago to now
     let todayKwh = 0;
     try {
       const now = new Date();
-      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const nowTime = now.getTime();
+      const startTime = nowTime - 24 * 60 * 60 * 1000;
       
       const energyLogsRes = await makeTuyaRequest(
-        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${eCode}&start_time=${midnight}&end_time=${nowTime}&size=100`,
+        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${eCode}&start_time=${startTime}&end_time=${nowTime}&size=100`,
         'GET'
       );
       
@@ -371,7 +374,7 @@ export const fetchLivePowerMeter = async (
         todayKwh = Number((sumRaw / 1000).toFixed(2));
       }
     } catch (err) {
-      console.warn("Failed to calculate live todayKwh from logs, falling back to instant DP:", err);
+      console.warn("Failed to calculate live 24h kWh from logs, falling back to instant DP:", err);
     }
 
     if (todayKwh === 0) {

@@ -667,7 +667,7 @@ export const PowerDetails: React.FC = () => {
               <TrendingUp className="kpi-icon text-success" />
               <span className="kpi-title">
                 {timeRange === '24h' 
-                  ? (isToday ? "Today's Energy Use" : "Energy Use (Selected Day)") 
+                  ? (isToday ? "24h Energy Use" : "Energy Use (Selected Day)") 
                   : "Avg Daily Energy"}
               </span>
             </div>
