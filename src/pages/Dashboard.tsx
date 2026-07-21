@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData, fetchInstantPowerStats, fetchRealDayPowerStats } from '../utils/deviceBridge';
+import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
 import { getCachedTuyaConfig } from '../utils/tuyaService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
@@ -15,13 +15,6 @@ import {
   CheckCircle2,
   Settings
 } from 'lucide-react';
-
-const getLocalTodayDateStr = () => {
-  // Returns Belgrade local today date string
-  const offset = 2; // Belgrade is UTC+2
-  const d = new Date(new Date().getTime() + offset * 3600 * 1000);
-  return d.toISOString().split('T')[0];
-};
 
 const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
   if (hourlyKwh && hourlyKwh.length === 24) {
@@ -43,7 +36,6 @@ export const Dashboard: React.FC = () => {
   const [connStatus, setConnStatus] = useState<{ status: 'local' | 'proxy' | 'cloud' | 'error'; detail?: string }>({ status: 'cloud' });
   const [sensors, setSensors] = useState<TempSensor[]>([]);
   const [powerData, setPowerData] = useState<PowerMeter | null>(null);
-  const [todayPowerDoc, setTodayPowerDoc] = useState<any | null>(null);
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [loading, setLoading] = useState(true);
   const [selectedMetrics, setSelectedMetrics] = useState<{ [sensorId: string]: 'temp' | 'humidity' }>({});
@@ -56,16 +48,6 @@ export const Dashboard: React.FC = () => {
       setSensors(data.sensors);
       setPowerData(data.power);
       setMode(data.mode);
-      
-      if (data.mode === 'live') {
-        try {
-          const todayStr = getLocalTodayDateStr();
-          const todayDoc = await fetchRealDayPowerStats(todayStr);
-          setTodayPowerDoc(todayDoc);
-        } catch (e) {
-          console.error("Failed to load today's power document on dashboard:", e);
-        }
-      }
       setLoading(false);
     };
     loadData();
@@ -80,12 +62,6 @@ export const Dashboard: React.FC = () => {
         const data = await fetchAllDeviceData();
         setSensors(data.sensors);
         setPowerData(data.power);
-        
-        if (data.mode === 'live') {
-          const todayStr = getLocalTodayDateStr();
-          const todayDoc = await fetchRealDayPowerStats(todayStr);
-          setTodayPowerDoc(todayDoc);
-        }
       } catch (err) {
         console.error("Error refreshing live data:", err);
       }
@@ -127,10 +103,11 @@ export const Dashboard: React.FC = () => {
             let fetchUrl = `${localUrl}/live`;
             let isProxied = false;
             // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints)
-            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && config.customProxyUrl) {
-              const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
-                ? config.customProxyUrl.trim().slice(0, -1) 
-                : config.customProxyUrl.trim();
+            const rawProxy = config.customProxyUrl?.trim();
+            const cleanProxy = rawProxy ? (rawProxy.endsWith('/') ? rawProxy.slice(0, -1) : rawProxy) : '';
+
+            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy
+            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && cleanProxy) {
               fetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
               isProxied = true;
             }
@@ -140,10 +117,25 @@ export const Dashboard: React.FC = () => {
               headers['Authorization'] = `Bearer ${config.clientSecret}`;
             }
 
-            const response = await fetch(fetchUrl, { 
-              headers,
-              signal: AbortSignal.timeout(6000) 
-            });
+            let response: Response;
+            try {
+              response = await fetch(fetchUrl, { 
+                headers,
+                signal: AbortSignal.timeout(4000) 
+              });
+            } catch (directErr) {
+              // On localhost, if direct fetch fails (e.g. CORS or off-site), retry via CORS proxy if available
+              if (!isProxied && cleanProxy && fetchUrl.startsWith('http://')) {
+                const proxyFetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
+                response = await fetch(proxyFetchUrl, { 
+                  headers,
+                  signal: AbortSignal.timeout(6000) 
+                });
+                isProxied = true;
+              } else {
+                throw directErr;
+              }
+            }
             if (response.ok) {
               const live = await response.json();
               if (live && live.status === 'offline') {
@@ -278,24 +270,6 @@ export const Dashboard: React.FC = () => {
   // Calculate live online device count
   const onlineDevicesCount = sensors.filter(s => s.status === 'online').length + 
                              (powerData ? (powerData.name.includes('Offline') ? 0 : 1) : 0);
-
-  // Construct today's hourly kWh history for the chart
-  let baseHourlyPower = todayPowerDoc?.hourly ? [...todayPowerDoc.hourly] : Array(24).fill(0);
-  
-  if (powerData && powerData.todayKwh !== undefined) {
-    const currentHour = new Date().getHours();
-    let recordedSum = 0;
-    for (let h = 0; h < currentHour; h++) {
-      recordedSum += baseHourlyPower[h] || 0;
-    }
-    const currentHourKwh = Math.max(0, powerData.todayKwh - recordedSum);
-    baseHourlyPower[currentHour] = Number(currentHourKwh.toFixed(3));
-  }
-
-  const dashboardHourlyData = baseHourlyPower.map((kwh: number, hour: number) => ({
-    time: `${hour.toString().padStart(2, '0')}:00`,
-    kwh
-  }));
 
   // Calculate monthly cost in RSD for Dashboard
   const currentMonth = `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}`;
@@ -458,7 +432,7 @@ export const Dashboard: React.FC = () => {
 
               <div className="realtime-metrics">
                 <div className="metric-row">
-                  <span className="metric-name">24h Usage</span>
+                  <span className="metric-name">Today's Usage</span>
                   <span className="metric-val">{powerData.todayKwh} kWh</span>
                 </div>
                 <div className="metric-row">
@@ -477,17 +451,17 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="widget-chart-section">
-              <h4>Hourly Energy Profile (kWh)</h4>
+              <h4>24-Hour Load Profile (Watts)</h4>
               <div className="chart-wrapper">
                 <LineAreaChart 
-                  data={dashboardHourlyData} 
+                  data={powerData.hourlyHistory} 
                   xKey="time" 
-                  yKey="kwh"
-                  yLabel="Energy"
-                  color="var(--color-primary)"
-                  fillColor="url(#gradient-indigo)"
+                  yKey="loadWatts"
+                  yLabel="Load"
+                  color="var(--color-accent)"
+                  fillColor="url(#gradient-cyan)"
                   height={160}
-                  valueSuffix=" kWh"
+                  valueSuffix=" W"
                   showMinMax={false}
                 />
               </div>

@@ -160,12 +160,14 @@ export const PowerDetails: React.FC = () => {
             }
 
             let fetchUrl = `${localUrl}/live`;
-            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy (only for unsecure HTTP endpoints)
-            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && config.customProxyUrl) {
-              const cleanProxy = config.customProxyUrl.trim().endsWith('/') 
-                ? config.customProxyUrl.trim().slice(0, -1) 
-                : config.customProxyUrl.trim();
+            let isProxied = false;
+            const rawProxy = config.customProxyUrl?.trim();
+            const cleanProxy = rawProxy ? (rawProxy.endsWith('/') ? rawProxy.slice(0, -1) : rawProxy) : '';
+
+            // Bypass Mixed Content blocking in production (HTTPS) by routing through the CORS proxy
+            if (window.location.protocol === 'https:' && fetchUrl.startsWith('http://') && cleanProxy) {
               fetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
+              isProxied = true;
             }
 
             const headers: HeadersInit = {};
@@ -173,10 +175,25 @@ export const PowerDetails: React.FC = () => {
               headers['Authorization'] = `Bearer ${config.clientSecret}`;
             }
 
-            const response = await fetch(fetchUrl, { 
-              headers,
-              signal: AbortSignal.timeout(6000) 
-            });
+            let response: Response;
+            try {
+              response = await fetch(fetchUrl, { 
+                headers,
+                signal: AbortSignal.timeout(4000) 
+              });
+            } catch (directErr) {
+              // On localhost, if direct fetch fails (e.g. CORS or off-site), retry via CORS proxy if available
+              if (!isProxied && cleanProxy && fetchUrl.startsWith('http://')) {
+                const proxyFetchUrl = `${cleanProxy}?url=${encodeURIComponent(fetchUrl)}`;
+                response = await fetch(proxyFetchUrl, { 
+                  headers,
+                  signal: AbortSignal.timeout(6000) 
+                });
+                isProxied = true;
+              } else {
+                throw directErr;
+              }
+            }
             if (response.ok) {
               const live = await response.json();
               if (live && live.status === 'offline') {

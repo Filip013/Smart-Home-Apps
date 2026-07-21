@@ -356,15 +356,15 @@ export const fetchLivePowerMeter = async (
     const currentLoad = powerStatus ? Number(scalePower(powerStatus.value).toFixed(1)) : 0;
     const voltage = voltStatus ? Number(scaleVoltage(voltStatus.value).toFixed(1)) : 0;
     const currentAmps = currStatus ? Number(scaleCurrent(currStatus.value).toFixed(2)) : 0;
-    // Calculate past 24 hours total kWh by summing add_ele logs from 24h ago to now
+    // Calculate today's total kWh by summing add_ele logs from midnight to now
     let todayKwh = 0;
     try {
       const now = new Date();
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const nowTime = now.getTime();
-      const startTime = nowTime - 24 * 60 * 60 * 1000;
       
       const energyLogsRes = await makeTuyaRequest(
-        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${eCode}&start_time=${startTime}&end_time=${nowTime}&size=100`,
+        `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${eCode}&start_time=${midnight}&end_time=${nowTime}&size=100`,
         'GET'
       );
       
@@ -374,7 +374,7 @@ export const fetchLivePowerMeter = async (
         todayKwh = Number((sumRaw / 1000).toFixed(2));
       }
     } catch (err) {
-      console.warn("Failed to calculate live 24h kWh from logs, falling back to instant DP:", err);
+      console.warn("Failed to calculate live todayKwh from logs, falling back to instant DP:", err);
     }
 
     if (todayKwh === 0) {
