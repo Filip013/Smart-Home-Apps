@@ -99,7 +99,7 @@ export const Dashboard: React.FC = () => {
     if (!powerData || mode !== 'live') return;
 
     let timeoutId: any = null;
-    let isLocalOnline = false;
+    let failedAttempts = 0;
     let isActive = true;
 
     const runSync = async () => {
@@ -142,10 +142,13 @@ export const Dashboard: React.FC = () => {
 
             const response = await fetch(fetchUrl, { 
               headers,
-              signal: AbortSignal.timeout(2000) 
+              signal: AbortSignal.timeout(6000) 
             });
             if (response.ok) {
               const live = await response.json();
+              if (live && live.status === 'offline') {
+                throw new Error("Local daemon reported plug offline");
+              }
               if (live && live.currentLoad !== undefined) {
                 setPowerData(prev => prev ? {
                   ...prev,
@@ -153,19 +156,19 @@ export const Dashboard: React.FC = () => {
                   voltage: live.voltage !== undefined ? Number(live.voltage) : prev.voltage,
                   currentAmps: live.currentAmps !== undefined ? Number(live.currentAmps) : prev.currentAmps
                 } : null);
-                isLocalOnline = true;
+                failedAttempts = 0;
                 setConnStatus({ status: isProxied ? 'proxy' : 'local' });
                 return; // Local fetch succeeded, bypass cloud fallback query
               }
             }
             throw new Error(`Server returned HTTP status ${response.status}`);
           } catch (localErr: any) {
-            // Local fetch failed (offline or away from home), fallback to cloud
-            if (isLocalOnline) {
-              console.warn("Local TV Box daemon went offline, falling back to Tuya Cloud:", localErr);
-              isLocalOnline = false;
+            failedAttempts++;
+            if (failedAttempts < 3) {
+              console.warn(`Local server fetch attempt ${failedAttempts}/3 failed, retaining current state:`, localErr);
+              return; // Retain current local/proxy status and skip cloud fallback for transient delays
             }
-            setConnStatus({ status: 'cloud', detail: `Local server offline (${localErr.message || String(localErr)})` });
+            setConnStatus({ status: 'cloud', detail: `Local server offline after 3 attempts (${localErr.message || String(localErr)})` });
           }
         } else {
           setConnStatus({ status: 'cloud', detail: 'Local TV Box IP not configured in Settings' });

@@ -134,7 +134,7 @@ export const PowerDetails: React.FC = () => {
     if (!powerData || mode !== 'live') return;
 
     let timeoutId: any = null;
-    let isLocalOnline = false;
+    let failedAttempts = 0;
     let isActive = true;
 
     const runSync = async () => {
@@ -175,10 +175,13 @@ export const PowerDetails: React.FC = () => {
 
             const response = await fetch(fetchUrl, { 
               headers,
-              signal: AbortSignal.timeout(2000) 
+              signal: AbortSignal.timeout(6000) 
             });
             if (response.ok) {
               const live = await response.json();
+              if (live && live.status === 'offline') {
+                throw new Error("Local daemon reported plug offline");
+              }
               if (live && live.currentLoad !== undefined) {
                 setPowerData(prev => prev ? {
                   ...prev,
@@ -186,15 +189,16 @@ export const PowerDetails: React.FC = () => {
                   voltage: live.voltage !== undefined ? Number(live.voltage) : prev.voltage,
                   currentAmps: live.currentAmps !== undefined ? Number(live.currentAmps) : prev.currentAmps
                 } : null);
-                isLocalOnline = true;
+                failedAttempts = 0;
                 return; // Local fetch succeeded, bypass cloud fallback query
               }
             }
-          } catch (localErr) {
-            // Local fetch failed (offline or away from home), fallback to cloud
-            if (isLocalOnline) {
-              console.warn("Local TV Box daemon went offline, falling back to Tuya Cloud:", localErr);
-              isLocalOnline = false;
+            throw new Error(`Server returned HTTP status ${response.status}`);
+          } catch (localErr: any) {
+            failedAttempts++;
+            if (failedAttempts < 3) {
+              console.warn(`Local server fetch attempt ${failedAttempts}/3 failed, retaining current state:`, localErr);
+              return; // Retain current local/proxy status and skip cloud fallback for transient delays
             }
           }
         }
