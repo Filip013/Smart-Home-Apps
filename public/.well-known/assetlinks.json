@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "app.vercel.aether_smart.twa",
+        "sha256_cert_fingerprints": ["F3:8B:B7:FB:23:17:62:E7:44:C9:9B:A1:7D:F6:8D:B2:98:DF:3A:6C:3B:06:B3:8B:B0:D3:36:D6:A8:E9:2B:6A"]
+      }
+    }]
