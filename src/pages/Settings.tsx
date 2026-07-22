@@ -20,7 +20,10 @@ import {
   Server,
   Database,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Sun,
+  Moon,
+  Settings as SettingsIcon
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -29,6 +32,7 @@ export const Settings: React.FC = () => {
   const [dpExpanded, setDpExpanded] = useState(false);
   const [backupExpanded, setBackupExpanded] = useState(false);
   const [dbExpanded, setDbExpanded] = useState(false);
+  const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Tuya credentials state
   const [clientId, setClientId] = useState('');
@@ -71,6 +75,33 @@ export const Settings: React.FC = () => {
   const [tuyaStatus, setTuyaStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [tuyaErrorMsg, setTuyaErrorMsg] = useState('');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Local Theme Preferences (System OS matching vs Manual Overrides)
+  const [ignoreSystemTheme, setIgnoreSystemTheme] = useState<boolean>(() => {
+    return localStorage.getItem('theme_ignore_system') === 'true';
+  });
+  const [currentTheme, setCurrentTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('theme') as 'dark' | 'light') || 'dark';
+  });
+
+  const handleSystemThemeToggle = (ignore: boolean) => {
+    setIgnoreSystemTheme(ignore);
+    localStorage.setItem('theme_ignore_system', ignore ? 'true' : 'false');
+    window.dispatchEvent(new Event('theme_changed'));
+  };
+
+  const handleThemeSelect = (mode: 'auto' | 'dark' | 'light') => {
+    if (mode === 'auto') {
+      setIgnoreSystemTheme(false);
+      localStorage.setItem('theme_ignore_system', 'false');
+    } else {
+      setIgnoreSystemTheme(true);
+      localStorage.setItem('theme_ignore_system', 'true');
+      localStorage.setItem('theme', mode);
+      setCurrentTheme(mode);
+    }
+    window.dispatchEvent(new Event('theme_changed'));
+  };
 
   const getLocalYesterdayDateStr = () => {
     const now = new Date();
@@ -811,6 +842,95 @@ export const Settings: React.FC = () => {
                     <div>
                       <label htmlFor="energy-code" style={{ color: 'var(--color-text-muted)', fontSize: '9px', display: 'block', marginBottom: '4px' }}>Energy (kWh)</label>
                       <input type="text" id="energy-code" value={energyCode} onChange={(e) => setEnergyCode(e.target.value)} style={{ width: '100%', padding: '4px 6px', border: '1px solid var(--color-border)', borderRadius: '4px', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '11px' }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Appearance & System Theme (Local Settings - Collapsible) */}
+            <section className="dashboard-card glass" aria-labelledby="appearance-settings-title">
+              <div 
+                className="card-header" 
+                onClick={() => setAppearanceExpanded(!appearanceExpanded)}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+              >
+                <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Sun className="card-icon text-warning" />
+                  <h3 id="appearance-settings-title" style={{ margin: 0 }}>Appearance & System Theme</h3>
+                </div>
+                <div className="text-muted" style={{ display: 'flex', alignItems: 'center' }}>
+                  {appearanceExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </div>
+              </div>
+
+              {appearanceExpanded && (
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                  
+                  {/* Follow System Theme Checkbox/Toggle */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', borderRadius: '8px', backgroundColor: 'var(--color-hover-bg)', border: '1px solid var(--color-border)' }}>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--color-text)' }}>Follow OS System Theme (Auto)</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Automatically match OS light/dark mode changes (stored locally).</span>
+                    </div>
+                    <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px' }}>
+                      <input 
+                        type="checkbox" 
+                        id="toggle-follow-system-theme"
+                        checked={!ignoreSystemTheme} 
+                        onChange={(e) => handleSystemThemeToggle(!e.target.checked)}
+                        style={{ opacity: 0, width: 0, height: 0 }}
+                      />
+                      <span style={{
+                        position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: !ignoreSystemTheme ? 'var(--color-primary)' : 'rgba(255,255,255,0.2)',
+                        transition: '0.2s', borderRadius: '24px'
+                      }}>
+                        <span style={{
+                          position: 'absolute', content: '""', height: '18px', width: '18px', left: '3px', bottom: '3px',
+                          backgroundColor: 'white', transition: '0.2s', borderRadius: '50%',
+                          transform: !ignoreSystemTheme ? 'translateX(20px)' : 'none'
+                        }} />
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Theme Buttons */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'var(--color-text-muted)' }}>
+                      Active Theme Mode
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                      <button
+                        type="button"
+                        id="btn-theme-auto"
+                        onClick={() => handleThemeSelect('auto')}
+                        className={`btn ${!ignoreSystemTheme ? 'primary' : 'secondary'}`}
+                        style={{ fontSize: '12px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        <SettingsIcon size={14} />
+                        <span>Auto (System)</span>
+                      </button>
+                      <button
+                        type="button"
+                        id="btn-theme-dark"
+                        onClick={() => handleThemeSelect('dark')}
+                        className={`btn ${ignoreSystemTheme && currentTheme === 'dark' ? 'primary' : 'secondary'}`}
+                        style={{ fontSize: '12px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        <Moon size={14} />
+                        <span>Dark</span>
+                      </button>
+                      <button
+                        type="button"
+                        id="btn-theme-light"
+                        onClick={() => handleThemeSelect('light')}
+                        className={`btn ${ignoreSystemTheme && currentTheme === 'light' ? 'primary' : 'secondary'}`}
+                        style={{ fontSize: '12px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        <Sun size={14} />
+                        <span>Light</span>
+                      </button>
                     </div>
                   </div>
                 </div>

@@ -79,7 +79,7 @@ export const fetchRealTempHistory = async (
         'GET'
       );
 
-      console.log(`[Temp Logs Page ${pageCount}] V2 Raw Response:`, res);
+      // console.log(`[Temp Logs Page ${pageCount}] V2 Raw Response:`, res);
 
       if (res && res.success === false) {
         console.warn(`Tuya API returned success:false for Temp Logs: ${res.msg}`);
@@ -346,7 +346,7 @@ export const fetchLivePowerMeter = async (
 
   try {
     const status = await getDeviceStatus(deviceId);
-    console.log("Raw Power Meter Status:", status);
+    // console.log("Raw Power Meter Status:", status);
 
     const powerStatus = status.find(s => s.code === pCode);
     const voltStatus = status.find(s => s.code === vCode);

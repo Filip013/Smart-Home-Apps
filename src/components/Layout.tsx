@@ -21,19 +21,70 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('theme');
-    return (saved as 'dark' | 'light') || 'dark';
+    const ignoreSystem = localStorage.getItem('theme_ignore_system') === 'true';
+    if (ignoreSystem) {
+      const saved = localStorage.getItem('theme');
+      return (saved as 'dark' | 'light') || 'dark';
+    }
+    const isSystemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return isSystemDark ? 'dark' : 'light';
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Apply theme to document
+  // Apply theme to document and listen to system theme / storage changes
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-  }, [theme]);
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const updateTheme = () => {
+      const ignoreSystem = localStorage.getItem('theme_ignore_system') === 'true';
+      let activeTheme: 'dark' | 'light' = 'dark';
+      if (ignoreSystem) {
+        const saved = localStorage.getItem('theme');
+        activeTheme = (saved as 'dark' | 'light') || 'dark';
+      } else {
+        activeTheme = mediaQuery.matches ? 'dark' : 'light';
+      }
+      setTheme(activeTheme);
+      document.documentElement.setAttribute('data-theme', activeTheme);
+    };
+
+    updateTheme();
+
+    const handleSystemChange = () => {
+      updateTheme();
+    };
+
+    const handleThemeEvent = () => {
+      updateTheme();
+    };
+
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleSystemChange);
+    } else {
+      mediaQuery.addListener(handleSystemChange);
+    }
+
+    window.addEventListener('storage', handleThemeEvent);
+    window.addEventListener('theme_changed', handleThemeEvent);
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleSystemChange);
+      } else {
+        mediaQuery.removeListener(handleSystemChange);
+      }
+      window.removeEventListener('storage', handleThemeEvent);
+      window.removeEventListener('theme_changed', handleThemeEvent);
+    };
+  }, []);
 
   const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', nextTheme);
+    localStorage.setItem('theme_ignore_system', 'true');
+    setTheme(nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    window.dispatchEvent(new Event('theme_changed'));
   };
 
   const navItems = [
