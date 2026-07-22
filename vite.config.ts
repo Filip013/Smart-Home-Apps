@@ -2,9 +2,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Dynamic base path depending on deployment target (Vercel vs GitHub Pages vs Local)
+const getBasePath = () => {
+  if (process.env.VERCEL) return '/';
+  if (process.env.GITHUB_ACTIONS) return '/Smart-Home-Apps/';
+  return './';
+};
+
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/Smart-Home-Apps/',
+  base: getBasePath(),
   plugins: [react()],
   server: {
     proxy: {
