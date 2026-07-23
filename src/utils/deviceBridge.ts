@@ -1,5 +1,5 @@
 import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats, fetchFirestoreDayPowerStats, fetchFirestoreDayClimateStats } from './tuyaService';
-import type { TempSensor, PowerMeter, TempReading } from './mockData';
+import type { TempSensor, PowerMeter } from './mockData';
 
 
 // Check if credentials are fully configured
@@ -55,11 +55,14 @@ const scaleCurrent = (val: any): number => {
 };
 
 // Query actual 24h temperature logs from Tuya OpenAPI (paginating to ensure we get the full 24h of data)
+// Query actual 24h temperature logs from Tuya OpenAPI (paginating to ensure we get the full 24h of data)
 export const fetchRealTempHistory = async (
   deviceId: string,
   tCode: string,
-  hCode: string
-): Promise<TempReading[]> => {
+  hCode: string,
+  fallbackTemp: number = 0,
+  fallbackHum: number = 0
+): Promise<{ time: string; temp: number; humidity: number }[]> => {
   try {
     // Tuya logs query expects Unix milliseconds (13 digits)
     const endTime = Date.now();
@@ -70,6 +73,18 @@ export const fetchRealTempHistory = async (
     let hasMore = true;
     let pageCount = 0;
 
+    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
+    const now = new Date();
+    const buckets: { hourStr: string; startMs: number; endMs: number; temps: number[]; hums: number[] }[] = [];
+    
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
+      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
+      const endMs = startMs + 60 * 60 * 1000;
+      buckets.push({ hourStr, startMs, endMs, temps: [], hums: [] });
+    }
+
     // Paginate using V2 API to retrieve up to 10 pages (1000 logs max) to cover active sensors
     while (hasMore && pageCount < 10) {
       const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
@@ -78,8 +93,6 @@ export const fetchRealTempHistory = async (
         `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${tCode},${hCode}&start_time=${startTime}&end_time=${endTime}&size=100${rowKeyParam}`,
         'GET'
       );
-
-      // console.log(`[Temp Logs Page ${pageCount}] V2 Raw Response:`, res);
 
       if (res && res.success === false) {
         console.warn(`Tuya API returned success:false for Temp Logs: ${res.msg}`);
@@ -98,20 +111,16 @@ export const fetchRealTempHistory = async (
       }
     }
 
-    if (allLogs.length === 0) return [];
-    const logs = allLogs;
-
-    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
-    const now = new Date();
-    const buckets: { hourStr: string; startMs: number; endMs: number; temps: number[]; hums: number[] }[] = [];
-    
-    for (let i = 23; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
-      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
-      const endMs = startMs + 60 * 60 * 1000;
-      buckets.push({ hourStr, startMs, endMs, temps: [], hums: [] });
+    // If no logs returned, generate 24 hours filled with fallback values
+    if (allLogs.length === 0) {
+      return buckets.map(b => ({
+        time: b.hourStr,
+        temp: fallbackTemp,
+        humidity: fallbackHum
+      }));
     }
+
+    const logs = allLogs;
 
     // Response logs contain event_time in milliseconds (13 digits)
     logs.forEach((log: any) => {
@@ -132,10 +141,10 @@ export const fetchRealTempHistory = async (
 
     const mapped = buckets.map(b => {
       const avgTemp = b.temps.length > 0 
-        ? Number((b.temps.reduce((a, b) => a + b, 0) / b.temps.length).toFixed(1))
+        ? Number((b.temps.reduce((acc: number, val: number) => acc + val, 0) / b.temps.length).toFixed(1))
         : null;
       const avgHum = b.hums.length > 0 
-        ? Math.round(b.hums.reduce((a, b) => a + b, 0) / b.hums.length)
+        ? Math.round(b.hums.reduce((acc: number, val: number) => acc + val, 0) / b.hums.length)
         : null;
 
       if (avgTemp !== null) currentTemp = avgTemp;
@@ -148,9 +157,9 @@ export const fetchRealTempHistory = async (
       };
     });
 
-    // Backfill any leading nulls (before the first log of the 24h window) with the first available reading
-    const firstValidTemp = mapped.find(m => m.temp !== null)?.temp ?? 0;
-    const firstValidHum = mapped.find(m => m.humidity !== null)?.humidity ?? 0;
+    // Backfill any leading nulls (before the first log of the 24h window) with the first available reading or fallback
+    const firstValidTemp = mapped.find(m => m.temp !== null)?.temp ?? fallbackTemp;
+    const firstValidHum = mapped.find(m => m.humidity !== null)?.humidity ?? fallbackHum;
 
     return mapped.map(m => ({
       time: m.time,
@@ -186,8 +195,8 @@ export const fetchLiveTempSensor = async (
     const currentHumidity = humStatus ? scaleHumidity(humStatus.value) : 0;
     const battery = batStatus ? parseTuyaVal(batStatus.value) : 0;
 
-    // Fetch actual real logs
-    const history = await fetchRealTempHistory(deviceId, tCode, hCode);
+    // Fetch actual real logs using current readings as fallback
+    const history = await fetchRealTempHistory(deviceId, tCode, hCode, currentTemp, currentHumidity);
 
     return {
       id: deviceId,
