@@ -126,14 +126,36 @@ export const fetchRealTempHistory = async (
       }
     });
 
-    return buckets.map(b => ({
-      time: b.hourStr,
-      temp: b.temps.length > 0 
+    // Process buckets with carry-forward logic (Tuya temp sensors only send logs on threshold change to save battery)
+    let currentTemp: number | null = null;
+    let currentHum: number | null = null;
+
+    const mapped = buckets.map(b => {
+      const avgTemp = b.temps.length > 0 
         ? Number((b.temps.reduce((a, b) => a + b, 0) / b.temps.length).toFixed(1))
-        : 0,
-      humidity: b.hums.length > 0 
+        : null;
+      const avgHum = b.hums.length > 0 
         ? Math.round(b.hums.reduce((a, b) => a + b, 0) / b.hums.length)
-        : 0
+        : null;
+
+      if (avgTemp !== null) currentTemp = avgTemp;
+      if (avgHum !== null) currentHum = avgHum;
+
+      return {
+        time: b.hourStr,
+        temp: currentTemp,
+        humidity: currentHum
+      };
+    });
+
+    // Backfill any leading nulls (before the first log of the 24h window) with the first available reading
+    const firstValidTemp = mapped.find(m => m.temp !== null)?.temp ?? 0;
+    const firstValidHum = mapped.find(m => m.humidity !== null)?.humidity ?? 0;
+
+    return mapped.map(m => ({
+      time: m.time,
+      temp: m.temp !== null ? m.temp : firstValidTemp,
+      humidity: m.humidity !== null ? m.humidity : firstValidHum
     }));
   } catch (error) {
     console.error("Error fetching real temperature history:", error);
