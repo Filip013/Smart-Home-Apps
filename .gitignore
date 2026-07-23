@@ -31,6 +31,3 @@ __pycache__/
 tuya-realtime/config.json
 tuya-realtime/tinytuya.json
 tuya-realtime/devices.json
-tuya-realtime/snapshot.json
-tuya-realtime/tuya-raw.json
-
