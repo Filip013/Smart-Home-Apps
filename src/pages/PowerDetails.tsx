@@ -678,13 +678,13 @@ export const PowerDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Card 2: Energy Use (Selected Day vs Month Avg) */}
+          {/* Card 2: Energy Use (Today's Usage vs Selected Day vs Month Avg) */}
           <div className="kpi-card glass">
             <div className="kpi-header">
               <TrendingUp className="kpi-icon text-success" />
               <span className="kpi-title">
                 {timeRange === '24h' 
-                  ? (isToday ? "24h Energy Use" : "Energy Use (Selected Day)") 
+                  ? (isToday ? "Today's Usage" : "Energy Use (Selected Day)") 
                   : "Avg Daily Energy"}
               </span>
             </div>
@@ -696,7 +696,7 @@ export const PowerDetails: React.FC = () => {
             <div className="kpi-footer">
               <span className="text-muted">
                 {timeRange === '24h'
-                  ? `CO₂ Footprint: ${(selectedDayKwh * 0.385).toFixed(2)} kg`
+                  ? (isToday ? "Usage today from 00:00 to now" : `CO₂ Footprint: ${(selectedDayKwh * 0.385).toFixed(2)} kg`)
                   : "Daily average consumption for selected month"}
               </span>
             </div>
@@ -750,7 +750,7 @@ export const PowerDetails: React.FC = () => {
               <Activity className="card-icon text-accent" />
               <h3 id="consumption-chart-title">
                 {timeRange === '24h' 
-                  ? `Hourly Power Profile: ${formatChartDate(selectedDate)}`
+                  ? (isToday ? "24-Hour Load Profile (Watts)" : `Hourly Power Profile: ${formatChartDate(selectedDate)}`)
                   : `Monthly Power Consumption: ${selectedMonth}`}
               </h3>
             </div>
@@ -763,14 +763,14 @@ export const PowerDetails: React.FC = () => {
               </div>
             ) : timeRange === '24h' ? (
               <LineAreaChart 
-                data={historicalHourlyPowerData} 
+                data={isToday ? powerData.hourlyHistory : historicalHourlyPowerData} 
                 xKey="time" 
-                yKey="kwh"
-                yLabel="Hourly Energy"
+                yKey={isToday ? "loadWatts" : "kwh"}
+                yLabel={isToday ? "Active Load" : "Hourly Energy"}
                 color="var(--color-primary)"
                 fillColor="url(#gradient-indigo)"
                 height={260}
-                valueSuffix=" kWh"
+                valueSuffix={isToday ? " W" : " kWh"}
               />
             ) : (
               <BarChart 
