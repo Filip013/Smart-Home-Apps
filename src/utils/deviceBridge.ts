@@ -226,7 +226,8 @@ export const fetchLiveTempSensor = async (
 // Query actual 24h power consumption logs from Tuya OpenAPI (paginating using V2 API to ensure we get full 24h of data)
 export const fetchRealPowerHistory = async (
   deviceId: string,
-  powerCode: string
+  powerCode: string,
+  fallbackLoad: number = 0
 ): Promise<{ time: string; loadWatts: number; voltage: number; currentAmps: number }[]> => {
   try {
     // Tuya logs query expects Unix milliseconds (13 digits)
@@ -237,6 +238,18 @@ export const fetchRealPowerHistory = async (
     let lastRowKey = '';
     let hasMore = true;
     let pageCount = 0;
+
+    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
+    const now = new Date();
+    const buckets: { hourStr: string; startMs: number; endMs: number; loads: number[] }[] = [];
+    
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
+      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
+      const endMs = startMs + 60 * 60 * 1000;
+      buckets.push({ hourStr, startMs, endMs, loads: [] });
+    }
 
     // Paginate using V2 API to retrieve up to 10 pages (1000 logs max)
     while (hasMore && pageCount < 10) {
@@ -264,20 +277,16 @@ export const fetchRealPowerHistory = async (
       }
     }
 
-    if (allLogs.length === 0) return [];
-    const pLogs = allLogs;
-
-    // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
-    const now = new Date();
-    const buckets: { hourStr: string; startMs: number; endMs: number; loads: number[] }[] = [];
-    
-    for (let i = 23; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
-      const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
-      const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
-      const endMs = startMs + 60 * 60 * 1000;
-      buckets.push({ hourStr, startMs, endMs, loads: [] });
+    if (allLogs.length === 0) {
+      return buckets.map(b => ({
+        time: b.hourStr,
+        loadWatts: fallbackLoad,
+        voltage: fallbackLoad > 0 ? 230 : 0,
+        currentAmps: fallbackLoad > 0 ? Number((fallbackLoad / 230).toFixed(2)) : 0
+      }));
     }
+
+    const pLogs = allLogs;
 
     pLogs.forEach((log: any) => {
       const eventMs = Number(log.event_time);
@@ -287,16 +296,30 @@ export const fetchRealPowerHistory = async (
       }
     });
 
-    return buckets.map(b => {
+    let currentLoad: number | null = null;
+
+    const mapped = buckets.map(b => {
       const avgLoad = b.loads.length > 0 
-        ? Math.round(b.loads.reduce((a, b) => a + b, 0) / b.loads.length)
-        : 0;
+        ? Math.round(b.loads.reduce((acc: number, val: number) => acc + val, 0) / b.loads.length)
+        : null;
+
+      if (avgLoad !== null) currentLoad = avgLoad;
 
       return {
         time: b.hourStr,
-        loadWatts: avgLoad,
-        voltage: avgLoad > 0 ? 230 : 0,
-        currentAmps: avgLoad > 0 ? Number((avgLoad / 230).toFixed(2)) : 0
+        loadWatts: currentLoad
+      };
+    });
+
+    const firstValidLoad = mapped.find(m => m.loadWatts !== null)?.loadWatts ?? fallbackLoad;
+
+    return mapped.map(m => {
+      const loadWatts = m.loadWatts !== null ? m.loadWatts : firstValidLoad;
+      return {
+        time: m.time,
+        loadWatts,
+        voltage: loadWatts > 0 ? 230 : 0,
+        currentAmps: loadWatts > 0 ? Number((loadWatts / 230).toFixed(2)) : 0
       };
     });
   } catch (error) {
@@ -414,7 +437,7 @@ export const fetchLivePowerMeter = async (
     }
 
     // Fetch actual real logs
-    const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode);
+    const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode, currentLoad);
     const dailyHistory = await fetchRealDailyPowerStats(deviceId, eCode);
 
     const weekKwh = Number(dailyHistory.slice(-7).reduce((acc, d) => acc + d.kwh, 0).toFixed(1));
