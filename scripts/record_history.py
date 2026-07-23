@@ -52,11 +52,17 @@ domain_map = {
 }
 target_domain = domain_map.get(region_code, 'openapi.tuyaeu.com')
 
-# sliding window setup (Last 48 Hours in UTC to capture full 24h of yesterday and today so far)
-end_time_ms = int(datetime.utcnow().timestamp() * 1000)
-start_time_ms = end_time_ms - 48 * 60 * 60 * 1000
+# Target dates to process explicitly: Yesterday (full 24h) and Today so far
+now_belgrade = datetime.now(ZoneInfo("Europe/Belgrade"))
+today_date = now_belgrade.date()
+yesterday_date = today_date - timedelta(days=1)
 
-print(f"Sliding query window (UTC): {datetime.utcfromtimestamp(start_time_ms/1000.0)} to {datetime.utcfromtimestamp(end_time_ms/1000.0)}")
+target_dates = [
+    yesterday_date.strftime('%Y-%m-%d'),
+    today_date.strftime('%Y-%m-%d')
+]
+
+print(f"Target recording dates (Belgrade local time): {target_dates}")
 
 def get_sha256(data_str):
     return hashlib.sha256(data_str.encode('utf-8')).hexdigest()
@@ -116,59 +122,55 @@ energy_code = config.get('energyCode', 'add_ele')
 if power_device_id:
     print(f"\nProcessing Energy Logs for device {power_device_id}...")
     
-    # We will paginate to make sure we fetch all logs (up to 10 pages, 1000 logs)
-    logs = []
-    last_row_key = ''
-    has_more = True
-    page_count = 0
-    success = True
-    err_msg = ""
-    
-    while has_more and page_count < 10:
-        row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
-        path = f"/v2.0/cloud/thing/{power_device_id}/report-logs?codes={energy_code}&start_time={start_time_ms}&end_time={end_time_ms}&size=100{row_key_param}"
-        res = make_tuya_request(path, 'GET', None, access_token)
+    for date_str in target_dates:
+        # Determine exact 24h local calendar day bounds in Belgrade (00:00:00 to 23:59:59)
+        year, month, day = map(int, date_str.split('-'))
+        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=ZoneInfo("Europe/Belgrade"))
+        dt_end = dt_start + timedelta(days=1)
         
-        if not res.get('success'):
-            success = False
-            err_msg = res.get('msg', 'Unknown error')
-            break
+        start_ms = int(dt_start.timestamp() * 1000)
+        end_ms = int(dt_end.timestamp() * 1000)
+        
+        print(f"\nFetching Energy logs for date {date_str} (Belgrade local time bounds: {dt_start} to {dt_end})...")
+        
+        logs = []
+        last_row_key = ''
+        has_more = True
+        page_count = 0
+        success = True
+        err_msg = ""
+        
+        while has_more and page_count < 10:
+            row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+            path = f"/v2.0/cloud/thing/{power_device_id}/report-logs?codes={energy_code}&start_time={start_ms}&end_time={end_ms}&size=100{row_key_param}"
+            res = make_tuya_request(path, 'GET', None, access_token)
             
-        result_data = res.get('result', {})
-        page_logs = result_data.get('logs', [])
-        logs.extend(page_logs)
-        
-        has_more = result_data.get('has_more', False)
-        last_row_key = result_data.get('last_row_key', '')
-        page_count += 1
-        
-        if not page_logs or not last_row_key:
-            break
+            if not res.get('success'):
+                success = False
+                err_msg = res.get('msg', 'Unknown error')
+                break
+                
+            result_data = res.get('result', {})
+            page_logs = result_data.get('logs', [])
+            logs.extend(page_logs)
+            
+            has_more = result_data.get('has_more', False)
+            last_row_key = result_data.get('last_row_key', '')
+            page_count += 1
+            
+            if not page_logs or not last_row_key:
+                break
 
-    if success:
-        print(f"Retrieved {len(logs)} energy logs.")
-        
-        # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
-        logs_by_date = {}
-        for log in logs:
-            dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
-            dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
-            date_key = dt_local.strftime('%Y-%m-%d')
-            if date_key not in logs_by_date:
-                logs_by_date[date_key] = []
-            logs_by_date[date_key].append(log)
+        if success and len(logs) > 0:
+            print(f"Retrieved {len(logs)} energy logs for date {date_str}.")
             
-        for date_str, date_logs in logs_by_date.items():
-            print(f"Merging Energy history for Date: {date_str} ({len(date_logs)} logs)")
-            
-            # Group date logs by Belgrade hour
             by_hour = [0.0] * 24
-            for log in date_logs:
+            for log in logs:
                 dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
                 dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
-                by_hour[dt_local.hour] += float(log['value'])
+                if 0 <= dt_local.hour < 24:
+                    by_hour[dt_local.hour] += float(log['value'])
 
-            # Convert thousandths of kWh (add_ele scale = 1000.0) to kWh
             hourly_kwh = [round(v / 1000.0, 3) for v in by_hour]
             kwh = round(sum(hourly_kwh), 2)
             
@@ -178,18 +180,16 @@ if power_device_id:
             cost = 0.0
             for h in range(24):
                 h_kwh = hourly_kwh[h]
-                if h >= 0 and h < 8:
+                if 0 <= h < 8:
                     cost += h_kwh * 4.15
                 else:
                     cost += h_kwh * 13.45
             cost = round(cost, 2)
             
-            # Peak kW estimation (highest hour * 4)
             peak_kw = round(max(hourly_kwh) * 4.0, 1) if len(hourly_kwh) > 0 else 0.0
 
-            print(f"Calculated -> Total kWh: {kwh}, Cost: {cost} RSD, Peak: {peak_kw} kW")
+            print(f"Calculated -> Date {date_str}: Total kWh: {kwh}, Cost: {cost} RSD, Peak: {peak_kw} kW")
 
-            # Save merged record to Firestore
             energy_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/energyHistory/{date_str}')
             energy_ref.set({
                 'kwh': kwh,
@@ -200,14 +200,13 @@ if power_device_id:
                 'hourly': hourly_kwh
             }, merge=True)
             print(f"Saved merged energy history to Firestore for date '{date_str}'.")
-    else:
-        print(f"Error fetching Tuya power logs: {err_msg}")
+        else:
+            print(f"No energy logs found or error for date '{date_str}': {err_msg}")
 else:
     print("\nSkipping power history: No power meter device ID configured.")
 
 
 # ----------------- SECTION 2: CLIMATE STATISTICS RECORDING -----------------
-# Setup sensors mapping
 sensors = []
 if config.get('tempDeviceId1'):
     sensors.append({
@@ -228,52 +227,45 @@ for sensor in sensors:
     print(f"\nProcessing Climate Logs for device {sensor['id']} ({sensor['key']})...")
     codes_str = f"{sensor['temp_code']},{sensor['hum_code']}"
     
-    # We will paginate to make sure we fetch all logs (up to 10 pages, 1000 logs)
-    logs = []
-    last_row_key = ''
-    has_more = True
-    page_count = 0
-    success = True
-    err_msg = ""
-    
-    while has_more and page_count < 10:
-        row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
-        path = f"/v2.0/cloud/thing/{sensor['id']}/report-logs?codes={codes_str}&start_time={start_time_ms}&end_time={end_time_ms}&size=100{row_key_param}"
-        res = make_tuya_request(path, 'GET', None, access_token)
+    for date_str in target_dates:
+        year, month, day = map(int, date_str.split('-'))
+        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=ZoneInfo("Europe/Belgrade"))
+        dt_end = dt_start + timedelta(days=1)
         
-        if not res.get('success'):
-            success = False
-            err_msg = res.get('msg', 'Unknown error')
-            break
+        start_ms = int(dt_start.timestamp() * 1000)
+        end_ms = int(dt_end.timestamp() * 1000)
+        
+        logs = []
+        last_row_key = ''
+        has_more = True
+        page_count = 0
+        success = True
+        err_msg = ""
+        
+        while has_more and page_count < 10:
+            row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+            path = f"/v2.0/cloud/thing/{sensor['id']}/report-logs?codes={codes_str}&start_time={start_ms}&end_time={end_ms}&size=100{row_key_param}"
+            res = make_tuya_request(path, 'GET', None, access_token)
             
-        result_data = res.get('result', {})
-        page_logs = result_data.get('logs', [])
-        logs.extend(page_logs)
-        
-        has_more = result_data.get('has_more', False)
-        last_row_key = result_data.get('last_row_key', '')
-        page_count += 1
-        
-        if not page_logs or not last_row_key:
-            break
+            if not res.get('success'):
+                success = False
+                err_msg = res.get('msg', 'Unknown error')
+                break
+                
+            result_data = res.get('result', {})
+            page_logs = result_data.get('logs', [])
+            logs.extend(page_logs)
+            
+            has_more = result_data.get('has_more', False)
+            last_row_key = result_data.get('last_row_key', '')
+            page_count += 1
+            
+            if not page_logs or not last_row_key:
+                break
 
-    if success:
-        print(f"Retrieved {len(logs)} climate logs.")
-        
-        # Group logs by date (converting UTC timestamp to Europe/Belgrade timezone)
-        logs_by_date = {}
-        for log in logs:
-            dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
-            dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
-            date_key = dt_local.strftime('%Y-%m-%d')
-            if date_key not in logs_by_date:
-                logs_by_date[date_key] = []
-            logs_by_date[date_key].append(log)
+        if success and len(logs) > 0:
+            print(f"Retrieved {len(logs)} climate logs for date {date_str}.")
             
-        for date_str, date_logs in logs_by_date.items():
-            print(f"Merging Climate history for Date: {date_str} ({len(date_logs)} logs)")
-            
-            # Get existing climate document from Firestore
             climate_ref = db.document(f'artifacts/smart-home-apps/users/{user_uid}/climateHistory/{date_str}')
             climate_doc = climate_ref.get()
             
@@ -288,12 +280,11 @@ for sensor in sensors:
                 sensor_stats = {}
                 hourly_dict = {}
 
-            # Group date logs by hour
             by_hour = {h: {'temps': [], 'hums': []} for h in range(24)}
             all_temps = []
             all_hums = []
             
-            for log in date_logs:
+            for log in logs:
                 val = float(log['value'])
                 dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
                 dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
@@ -307,9 +298,8 @@ for sensor in sensors:
                     by_hour[h]['hums'].append(val_scaled)
                     all_hums.append(val_scaled)
 
-            # Sort date logs to get initial carry-forward values
-            sorted_temp_logs = sorted([l for l in date_logs if l['code'] == sensor['temp_code']], key=lambda x: int(x['event_time']))
-            sorted_hum_logs = sorted([l for l in date_logs if l['code'] == sensor['hum_code']], key=lambda x: int(x['event_time']))
+            sorted_temp_logs = sorted([l for l in logs if l['code'] == sensor['temp_code']], key=lambda x: int(x['event_time']))
+            sorted_hum_logs = sorted([l for l in logs if l['code'] == sensor['hum_code']], key=lambda x: int(x['event_time']))
 
             avg_temp_day = sum(all_temps) / len(all_temps) if len(all_temps) > 0 else None
             avg_hum_day = sum(all_hums) / len(all_hums) if len(all_hums) > 0 else None
@@ -324,7 +314,6 @@ for sensor in sensors:
                 v = float(sorted_hum_logs[0]['value'])
                 last_hum = v / 10.0 if v > 100.0 else v
 
-            # Merge and update hourly dict
             for h in range(24):
                 has_data = len(by_hour[h]['temps']) > 0 or len(by_hour[h]['hums']) > 0
                 if has_data:
@@ -337,7 +326,6 @@ for sensor in sensors:
                         'humidity': int(round(h_hum)) if h_hum is not None else None
                     }
                 else:
-                    # Carry forward if not already in hourly_dict
                     if h not in hourly_dict:
                         if h > 0 and (h-1) in hourly_dict:
                             hourly_dict[h] = {
@@ -352,10 +340,7 @@ for sensor in sensors:
                                 'humidity': int(round(last_hum)) if last_hum is not None else None
                             }
 
-            # Build final sorted list of 24 hourly values
             final_hourly = [hourly_dict[h] for h in range(24)]
-            
-            # Recompute daily aggregates from merged hourly values
             valid_temps = [item['temp'] for item in final_hourly if item['temp'] is not None]
             valid_hums = [item['humidity'] for item in final_hourly if item['humidity'] is not None]
             
@@ -368,15 +353,11 @@ for sensor in sensors:
 
             sensor_stats['hourly'] = final_hourly
             climate_data[sensor['key']] = sensor_stats
-            print(f"Merged Climate Stats: {sensor_stats}")
 
-            # Save back to Firestore
             climate_ref.set({
                 'date': date_str,
                 'sensors': climate_data
             }, merge=True)
             print(f"Saved merged climate history to Firestore for date '{date_str}'.")
-    else:
-        print(f"Error fetching Tuya climate logs: {climate_res.get('msg')}")
 
 print("\nHistory recording run completed successfully.")
