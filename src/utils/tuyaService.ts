@@ -125,8 +125,11 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       // 1. Start the local server in Rust to listen for token
       const tokenPromise = invoke<string>('start_auth_server');
 
-      // 2. Open default browser (do not await since xdg-open/system launcher can block)
-      openUrl(authProxyUrl).catch(console.error);
+      // 2. Open default browser (fall back to window.open if plugin-opener fails)
+      openUrl(authProxyUrl).catch((err) => {
+        console.warn("openUrl failed, falling back to window.open:", err);
+        window.open(authProxyUrl, '_blank');
+      });
 
       // 3. Wait for token from local auth server
       const token = await tokenPromise;

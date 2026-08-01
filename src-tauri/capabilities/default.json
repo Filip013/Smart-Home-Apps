@@ -3,9 +3,11 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "*"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "opener:default",
+    "opener:allow-open-url"
   ]
 }
