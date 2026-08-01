@@ -9,11 +9,29 @@ const getBasePath = () => {
   return './';
 };
 
+const host = process.env.TAURI_DEV_HOST;
+
 // https://vite.dev/config/
 export default defineConfig({
+  clearScreen: false,
   base: getBasePath(),
   plugins: [react()],
+  envPrefix: ['VITE_', 'TAURI_ENV_*', 'TAURI_'],
   server: {
+    port: 5173,
+    strictPort: true,
+    host: host || false,
+    hmr: host
+      ? {
+          protocol: 'ws',
+          host,
+          port: 5174,
+        }
+      : undefined,
+    watch: {
+      // 3. tell vite to ignore watching `src-tauri`
+      ignored: ['**/src-tauri/**'],
+    },
     proxy: {
       '/tuya-us': {
         target: 'https://openapi.tuyaus.com',

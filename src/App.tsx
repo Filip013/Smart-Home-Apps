@@ -1,53 +1,17 @@
 import { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged, auth, signInWithGoogle } from './utils/tuyaService';
+import { onAuthStateChanged, auth, signInWithGoogle, getRedirectResult } from './utils/tuyaService';
 import type { User } from 'firebase/auth';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { PowerDetails } from './pages/PowerDetails';
 import { ExportPrint } from './pages/ExportPrint';
 import { Settings } from './pages/Settings';
+import { DesktopAuth } from './pages/DesktopAuth';
 import { Zap } from 'lucide-react';
 import './index.css';
 
-function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState('');
-
-  useEffect(() => {
-    // Listen to Firebase Auth state shifts
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async () => {
-    setLoading(true);
-    setAuthError('');
-    try {
-      await signInWithGoogle();
-    } catch (e: any) {
-      console.error(e);
-      setAuthError(e.message || 'Authentication failed. Please try again.');
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="loading-screen" style={{ height: '100vh', backgroundColor: 'var(--color-bg)' }}>
-        <Zap className="animate-spin text-primary" size={56} style={{ filter: 'drop-shadow(0 0 10px var(--color-primary))' }} />
-        <p style={{ fontFamily: 'Outfit', fontWeight: 600, color: 'var(--color-text)', marginTop: '12px' }}>
-          Authorizing connection...
-        </p>
-      </div>
-    );
-  }
-
-  // Render Login view if user is unauthenticated
+function MainApp({ user, authError, handleLogin }: { user: User | null; authError: string; handleLogin: () => void }) {
   if (!user) {
     return (
       <div 
@@ -154,18 +118,67 @@ function App() {
     );
   }
 
-  // Load router views if logged in
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/power" element={<PowerDetails />} />
+        <Route path="/export" element={<ExportPrint />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
+
+function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+
+  useEffect(() => {
+    // Check if coming back from a redirect sign-in flow
+    getRedirectResult(auth).catch((err) => {
+      console.warn("Redirect sign-in error:", err);
+    });
+
+    // Listen to Firebase Auth state shifts
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    setLoading(true);
+    setAuthError('');
+    try {
+      await signInWithGoogle();
+    } catch (e: any) {
+      console.error(e);
+      setAuthError(e.message || 'Authentication failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="loading-screen" style={{ height: '100vh', backgroundColor: 'var(--color-bg)' }}>
+        <Zap className="animate-spin text-primary" size={56} style={{ filter: 'drop-shadow(0 0 10px var(--color-primary))' }} />
+        <p style={{ fontFamily: 'Outfit', fontWeight: 600, color: 'var(--color-text)', marginTop: '12px' }}>
+          Authorizing connection...
+        </p>
+      </div>
+    );
+  }
+
   return (
     <Router>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/power" element={<PowerDetails />} />
-          <Route path="/export" element={<ExportPrint />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        <Route path="/desktop-auth" element={<DesktopAuth />} />
+        <Route path="*" element={<MainApp user={user} authError={authError} handleLogin={handleLogin} />} />
+      </Routes>
     </Router>
   );
 }

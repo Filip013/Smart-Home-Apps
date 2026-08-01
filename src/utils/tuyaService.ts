@@ -4,10 +4,13 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithCredential,
   signOut as fbSignOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  getRedirectResult
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
+import { isTauri, invoke } from '@tauri-apps/api/core';
 import { sha256, hmacSha256 } from './cryptoUtils';
 
 export interface TuyaConfig {
@@ -105,10 +108,44 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Google Auth Handlers
-export const signInWithGoogle = async (): Promise<User> => {
+export const signInWithGoogle = async (): Promise<User | null> => {
   googleProvider.setCustomParameters({ prompt: 'select_account' });
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  
+  if (isTauri()) {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      // In development, use local dev server. In production, use window.location.origin or Vercel URL
+      const baseUrl = import.meta.env.DEV 
+        ? "http://localhost:5173" 
+        : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
+            ? window.location.origin
+            : "https://smart-home-apps.vercel.app");
+      const authProxyUrl = `${baseUrl}/#/desktop-auth?source=tauri`;
+
+      // 1. Start the local server in Rust to listen for token
+      const tokenPromise = invoke<string>('start_auth_server');
+
+      // 2. Open default browser (do not await since xdg-open/system launcher can block)
+      openUrl(authProxyUrl).catch(console.error);
+
+      // 3. Wait for token from local auth server
+      const token = await tokenPromise;
+
+      if (token) {
+        const credential = GoogleAuthProvider.credential(token.trim());
+        const result = await signInWithCredential(auth, credential);
+        return result.user;
+      } else {
+        throw new Error("No token returned from authentication server.");
+      }
+    } catch (err) {
+      console.error("Desktop Auth Error:", err);
+      throw err;
+    }
+  } else {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  }
 };
 
 export const signOut = async (): Promise<void> => {
@@ -117,7 +154,7 @@ export const signOut = async (): Promise<void> => {
   clearTokenCache();
 };
 
-export { onAuthStateChanged };
+export { onAuthStateChanged, getRedirectResult };
 
 // Save Tuya Config tied to User UID
 export const saveTuyaConfig = async (config: TuyaConfig): Promise<void> => {
