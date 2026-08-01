@@ -119,7 +119,7 @@ export const signInWithGoogle = async (): Promise<User | null> => {
         ? "http://localhost:5173" 
         : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
             ? window.location.origin
-            : "https://smart-home-apps.vercel.app");
+            : "https://aether-smart.vercel.app");
       const authProxyUrl = `${baseUrl}/#/desktop-auth?source=tauri`;
 
       // 1. Start the local server in Rust to listen for token
