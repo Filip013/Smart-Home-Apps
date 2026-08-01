@@ -8,11 +8,21 @@ export const DesktopAuth = () => {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
+    const getQueryParam = (param: string) => {
+      const searchVal = new URLSearchParams(window.location.search).get(param);
+      if (searchVal) return searchVal;
+      const hash = window.location.hash;
+      if (hash.includes('?')) {
+        return new URLSearchParams(hash.split('?')[1]).get(param);
+      }
+      return null;
+    };
+
+    const source = getQueryParam('source');
     
     const performAuth = async () => {
       try {
-        if (urlParams.get('source') === 'tauri') {
+        if (source === 'tauri') {
           setStatus("Opening Google Sign In popup...");
           googleProvider.setCustomParameters({ prompt: 'select_account' });
           const res = await signInWithPopup(auth, googleProvider);
