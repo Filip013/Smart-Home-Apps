@@ -7,7 +7,8 @@ import {
   fetchRealDayClimateStats,
   fetchInstantPowerStats
 } from '../utils/deviceBridge';
-import { getCachedTuyaConfig } from '../utils/tuyaService';
+import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
+import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -144,6 +145,57 @@ export const PowerDetails: React.FC = () => {
         const config = getCachedTuyaConfig();
         if (!config) return;
 
+        // ── Worker mode: route TV Box poll through Cloudflare Worker /proxy ──────
+        if (getWorkerModeEnabled() && config.localTvBoxIp && config.customProxyUrl) {
+          try {
+            const result = await fetchInstantPowerFromWorkerProxy(
+              config.localTvBoxIp,
+              config.customProxyUrl,
+              config.clientSecret
+            );
+            if (result) {
+              setPowerData(prev => prev ? {
+                ...prev,
+                currentLoad: result.currentLoad,
+                voltage:     result.voltage,
+                currentAmps: result.currentAmps
+              } : null);
+              failedAttempts = 0;
+              return;
+            }
+          } catch (workerErr: any) {
+            failedAttempts++;
+            if (failedAttempts < 3) {
+              console.warn(`Worker proxy attempt ${failedAttempts}/3 failed:`, workerErr);
+              return;
+            }
+          }
+
+          // Cloud fallback (throttled to every 30 s)
+          const now = Date.now();
+          const lastCloudCall = (window as any)._lastCloudCall || 0;
+          if (now - lastCloudCall > 30000) {
+            (window as any)._lastCloudCall = now;
+            if (config.powerDeviceId) {
+              const instant = await fetchInstantPowerStats(config.powerDeviceId, {
+                powerCode:   config.powerCode,
+                voltageCode: config.voltageCode,
+                currentCode: config.currentCode
+              });
+              if (instant) {
+                setPowerData(prev => prev ? {
+                  ...prev,
+                  currentLoad: instant.currentLoad,
+                  voltage:     instant.voltage,
+                  currentAmps: instant.currentAmps
+                } : null);
+              }
+            }
+          }
+          return;
+        }
+
+        // ── Local / legacy path (worker mode off) ────────────────────────────────
         // 1. Try querying the local TV Box daemon if configured
         if (config.localTvBoxIp) {
           try {

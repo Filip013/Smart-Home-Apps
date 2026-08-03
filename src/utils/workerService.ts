@@ -113,16 +113,28 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
   let power: PowerMeter | null = null;
   if (data.power) {
     const p = data.power;
+    const monthKwh = Number(p.monthKwh) || 0;
+
+    // estMonthlyCost and breakdown are no longer returned by the worker.
+    // Compute them locally using the same formulas as deviceBridge.ts.
+    const estMonthlyCost = Number((monthKwh * 0.15).toFixed(2));
+    const breakdown = [
+      { name: 'Heating & Cooling',        percentage: 38, kwh: Number((monthKwh * 0.38).toFixed(1)), color: 'var(--color-primary)' },
+      { name: 'Major Appliances',          percentage: 27, kwh: Number((monthKwh * 0.27).toFixed(1)), color: 'var(--color-secondary)' },
+      { name: 'Lighting & Smart Devices',  percentage: 19, kwh: Number((monthKwh * 0.19).toFixed(1)), color: 'var(--color-accent)' },
+      { name: 'Standby / Other Devices',   percentage: 16, kwh: Number((monthKwh * 0.16).toFixed(1)), color: 'var(--color-warning)' },
+    ];
+
     power = {
       id:              p.id   || config.powerDeviceId || 'power-meter',
       name:            p.name || config.powerName     || 'Main Grid Meter',
-      currentLoad:     Number(p.currentLoad)     || 0,
-      voltage:         Number(p.voltage)         || 0,
-      currentAmps:     Number(p.currentAmps)     || 0,
-      todayKwh:        Number(p.todayKwh)        || 0,
-      weekKwh:         Number(p.weekKwh)         || 0,
-      monthKwh:        Number(p.monthKwh)        || 0,
-      estMonthlyCost:  Number(p.estMonthlyCost)  || 0,
+      currentLoad:     Number(p.currentLoad)  || 0,
+      voltage:         Number(p.voltage)      || 0,
+      currentAmps:     Number(p.currentAmps)  || 0,
+      todayKwh:        Number(p.todayKwh)     || 0,
+      weekKwh:         Number(p.weekKwh)      || 0,
+      monthKwh,
+      estMonthlyCost,
       hourlyHistory:   Array.isArray(p.hourlyHistory) ? p.hourlyHistory.map((h: any) => ({
         time:        String(h.time),
         loadWatts:   Number(h.loadWatts)   || 0,
@@ -132,8 +144,8 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
       // Worker returns dailyHistory as [] — Firestore-sourced daily history is not
       // available through the worker, so keep empty and let the page fall back to
       // its own Firestore fetch if needed.
-      dailyHistory:    [],
-      breakdown:       Array.isArray(p.breakdown) ? p.breakdown : [],
+      dailyHistory: [],
+      breakdown,
     };
   }
 
