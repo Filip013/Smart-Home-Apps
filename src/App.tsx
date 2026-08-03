@@ -9,7 +9,7 @@ import { ExportPrint } from './pages/ExportPrint';
 import { Settings } from './pages/Settings';
 import { DesktopAuth } from './pages/DesktopAuth';
 import { Zap } from 'lucide-react';
-import './index.css';
+import './index.css'; 
 
 function MainApp({ user, authError, handleLogin }: { user: User | null; authError: string; handleLogin: () => void }) {
   if (!user) {
