@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
-import { getCachedTuyaConfig } from '../utils/tuyaService';
+import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
+import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
 import { 
@@ -39,6 +40,8 @@ export const Dashboard: React.FC = () => {
   const [mode, setMode] = useState<'demo' | 'live'>('demo');
   const [loading, setLoading] = useState(true);
   const [selectedMetrics, setSelectedMetrics] = useState<{ [sensorId: string]: 'temp' | 'humidity' }>({});
+  // Tracks whether dashboard data was loaded from the Cloudflare Worker or local Tuya calls
+  const [dataSource, setDataSource] = useState<'local' | 'worker'>(getWorkerModeEnabled() ? 'worker' : 'local');
 
   // Initialize data
   useEffect(() => {
@@ -48,14 +51,19 @@ export const Dashboard: React.FC = () => {
       setSensors(data.sensors);
       setPowerData(data.power);
       setMode(data.mode);
+      // Record whether data came from the worker or local Tuya calls
+      setDataSource(getWorkerModeEnabled() ? 'worker' : 'local');
       setLoading(false);
     };
     loadData();
   }, []);
 
   // Periodic live data sync from Tuya API (every 30 seconds)
+  // Disabled when worker mode is on: /api/status is heavyweight (24h history) and
+  // was already fetched on initial load. Manual refresh via page reload is sufficient.
   useEffect(() => {
     if (sensors.length === 0 && !powerData) return;
+    if (getWorkerModeEnabled()) return; // worker mode: no periodic full re-fetch
 
     const interval = setInterval(async () => {
       try {
@@ -85,6 +93,62 @@ export const Dashboard: React.FC = () => {
         const config = getCachedTuyaConfig();
         if (!config) return;
 
+        // ── Worker mode: route TV Box poll through Cloudflare Worker /proxy ──────
+        // This avoids CORS errors and Mixed-Content blocks (HTTP TV Box behind HTTPS app).
+        // The worker authenticates with the TV Box using the forwarded Authorization header.
+        if (getWorkerModeEnabled() && config.localTvBoxIp && config.customProxyUrl) {
+          try {
+            const result = await fetchInstantPowerFromWorkerProxy(
+              config.localTvBoxIp,
+              config.customProxyUrl,
+              config.clientSecret
+            );
+            if (result) {
+              setPowerData(prev => prev ? {
+                ...prev,
+                currentLoad: result.currentLoad,
+                voltage:     result.voltage,
+                currentAmps: result.currentAmps
+              } : null);
+              failedAttempts = 0;
+              setConnStatus({ status: 'proxy' });
+              return; // worker proxy succeeded
+            }
+          } catch (workerErr: any) {
+            failedAttempts++;
+            if (failedAttempts < 3) {
+              console.warn(`Worker proxy attempt ${failedAttempts}/3 failed:`, workerErr);
+              return;
+            }
+            // After 3 failures fall through to cloud fallback
+            setConnStatus({ status: 'cloud', detail: `Worker proxy offline after 3 attempts (${workerErr.message || String(workerErr)})` });
+          }
+
+          // Cloud fallback (throttled to every 30 s)
+          const now = Date.now();
+          const lastCloudCall = (window as any)._lastCloudCall || 0;
+          if (now - lastCloudCall > 30000) {
+            (window as any)._lastCloudCall = now;
+            if (config.powerDeviceId) {
+              const instant = await fetchInstantPowerStats(config.powerDeviceId, {
+                powerCode:   config.powerCode,
+                voltageCode: config.voltageCode,
+                currentCode: config.currentCode
+              });
+              if (instant) {
+                setPowerData(prev => prev ? {
+                  ...prev,
+                  currentLoad: instant.currentLoad,
+                  voltage:     instant.voltage,
+                  currentAmps: instant.currentAmps
+                } : null);
+              }
+            }
+          }
+          return;
+        }
+
+        // ── Local / legacy path (worker mode off) ────────────────────────────────
         // 1. Try querying the local TV Box daemon if configured
         if (config.localTvBoxIp) {
           try {
@@ -350,33 +414,54 @@ export const Dashboard: React.FC = () => {
       {/* Overview Banner / Hero section */}
       <section className="overview-hero glass" aria-label="System Quick Summary">
         <div className="hero-welcome">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
-            <h2 style={{ margin: 0 }}>Welcome Back</h2>
-            <div className={`status-badge ${connStatus.status}`} style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '11px',
-              fontWeight: 600,
-              padding: '4px 10px',
-              borderRadius: '12px',
-              backgroundColor: connStatus.status === 'local' ? 'rgba(16, 185, 129, 0.12)' : connStatus.status === 'proxy' ? 'rgba(59, 130, 246, 0.12)' : connStatus.status === 'cloud' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-              color: connStatus.status === 'local' ? '#10b981' : connStatus.status === 'proxy' ? '#3b82f6' : connStatus.status === 'cloud' ? '#f59e0b' : '#ef4444',
-              border: '1px solid currentColor',
-              lineHeight: '1.2'
-            }}>
-              <span style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: 'currentColor',
-                display: 'inline-block'
-              }}></span>
-              <span>
-                {connStatus.status === 'local' ? 'Live (LAN)' : connStatus.status === 'proxy' ? 'Live (Proxy)' : connStatus.status === 'cloud' ? 'Cloud Sync' : `Local Server Connection Failed: ${connStatus.detail}`}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              <h2 style={{ margin: 0 }}>Welcome Back</h2>
+              {/* Data source badge — reflects how the history/sensor data was loaded */}
+              <div
+                id="data-source-badge"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  backgroundColor: dataSource === 'worker' ? 'rgba(129, 140, 248, 0.12)' : 'rgba(16, 185, 129, 0.10)',
+                  color: dataSource === 'worker' ? '#818cf8' : '#10b981',
+                  border: '1px solid currentColor',
+                  lineHeight: '1.2'
+                }}
+              >
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor', display: 'inline-block' }} />
+                <span>{dataSource === 'worker' ? '☁ Worker BFF' : '⚙ Local API'}</span>
+              </div>
+              {/* Real-time connection status badge — reflects the 1s polling loop */}
+              <div className={`status-badge ${connStatus.status}`} style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '11px',
+                fontWeight: 600,
+                padding: '4px 10px',
+                borderRadius: '12px',
+                backgroundColor: connStatus.status === 'local' ? 'rgba(16, 185, 129, 0.12)' : connStatus.status === 'proxy' ? 'rgba(59, 130, 246, 0.12)' : connStatus.status === 'cloud' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                color: connStatus.status === 'local' ? '#10b981' : connStatus.status === 'proxy' ? '#3b82f6' : connStatus.status === 'cloud' ? '#f59e0b' : '#ef4444',
+                border: '1px solid currentColor',
+                lineHeight: '1.2'
+              }}>
+                <span style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: 'currentColor',
+                  display: 'inline-block'
+                }}></span>
+                <span>
+                  {connStatus.status === 'local' ? 'Live (LAN)' : connStatus.status === 'proxy' ? 'Live (Proxy)' : connStatus.status === 'cloud' ? 'Cloud Sync' : `Local Server Connection Failed: ${connStatus.detail}`}
+                </span>
+              </div>
             </div>
-          </div>
           <p style={{ margin: 0 }}>Here is what's happening in your connected home today.</p>
         </div>
         <div className="hero-stats">

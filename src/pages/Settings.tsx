@@ -6,7 +6,9 @@ import {
   testFullConnection,
   makeTuyaRequest,
   auth,
-  db
+  db,
+  getWorkerModeEnabled,
+  setWorkerModeEnabled
 } from '../utils/tuyaService';
 import type { TuyaConfig } from '../utils/tuyaService';
 import { doc, setDoc } from 'firebase/firestore';
@@ -33,6 +35,57 @@ export const Settings: React.FC = () => {
   const [backupExpanded, setBackupExpanded] = useState(false);
   const [dbExpanded, setDbExpanded] = useState(false);
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
+  const [dataSourceExpanded, setDataSourceExpanded] = useState(false);
+
+  // Worker mode (device-local only — never synced to Firebase)
+  const [workerModeEnabled, setWorkerModeEnabledState] = useState<boolean>(() => getWorkerModeEnabled());
+  const handleWorkerModeToggle = (val: boolean) => {
+    setWorkerModeEnabledState(val);
+    setWorkerModeEnabled(val);
+  };
+
+  // Worker connection test state
+  const [workerTestStatus, setWorkerTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [workerTestMsg, setWorkerTestMsg] = useState('');
+  const handleTestWorker = async () => {
+    const raw = customProxyUrl.trim();
+    if (!raw) {
+      setWorkerTestStatus('error');
+      setWorkerTestMsg('No Custom CORS Proxy URL configured above.');
+      return;
+    }
+    const base = raw.endsWith('/') ? raw.slice(0, -1) : raw;
+    setWorkerTestStatus('testing');
+    setWorkerTestMsg('');
+    try {
+      // Build minimal params — just enough for the worker to attempt a status call
+      const params = new URLSearchParams();
+      if (clientId.trim())     params.set('clientId',     clientId.trim());
+      if (clientSecret.trim()) params.set('clientSecret', clientSecret.trim());
+      if (region)              params.set('region',       region);
+      const authHeader = clientSecret.trim()
+        ? `Bearer ${clientSecret.trim()}`
+        : undefined;
+      const headers: HeadersInit = { 'Accept': 'application/json' };
+      if (authHeader) headers['Authorization'] = authHeader;
+      const res = await fetch(`${base}/api/status?${params.toString()}`, {
+        method: 'GET',
+        headers,
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const sCount = (data.sensors || []).length;
+      const pLoad  = data.power?.currentLoad ?? 'N/A';
+      setWorkerTestStatus('success');
+      setWorkerTestMsg(`✓ Worker responded: ${sCount} sensor(s), active load: ${pLoad} W`);
+    } catch (err: any) {
+      setWorkerTestStatus('error');
+      setWorkerTestMsg(err.message || 'Worker test failed.');
+    }
+  };
 
   // Tuya credentials state
   const [clientId, setClientId] = useState('');
@@ -662,6 +715,101 @@ export const Settings: React.FC = () => {
               </div>
             )}
           </section>
+
+          {/* ─── Data Source (Worker Mode) ─── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+            {/* Data Source Card (Collapsible) */}
+            <section className="dashboard-card glass" aria-labelledby="data-source-title">
+              <div
+                className="card-header"
+                onClick={() => setDataSourceExpanded(!dataSourceExpanded)}
+                style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+              >
+                <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <Server className="card-icon" style={{ color: '#818cf8' }} />
+                  <h3 id="data-source-title" style={{ margin: 0 }}>Data Source</h3>
+                </div>
+                <div className="text-muted" style={{ display: 'flex', alignItems: 'center' }}>
+                  {dataSourceExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                </div>
+              </div>
+
+              {dataSourceExpanded && (
+                <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+
+                  {/* Toggle row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', borderRadius: '8px', backgroundColor: 'var(--color-hover-bg)', border: '1px solid var(--color-border)' }}>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '13px', color: 'var(--color-text)' }}>Use Cloudflare Worker for Dashboard Data</strong>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                        When on, the dashboard calls <code>/api/status</code> on the Worker instead of making ~6–8 individual Tuya API calls locally.
+                        The real-time 1 s power loop is routed through the Worker’s <code>/proxy</code> endpoint to avoid CORS/Mixed-Content errors.
+                        Requires the <em>Custom CORS Proxy URL</em> field above to be set.
+                      </span>
+                      <span style={{ display: 'block', marginTop: '4px', fontSize: '10px', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                        ⚠️ Device-local — not synced to the cloud.
+                      </span>
+                    </div>
+                    <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '44px', height: '24px', flexShrink: 0, marginLeft: '16px' }}>
+                      <input
+                        type="checkbox"
+                        id="toggle-worker-mode"
+                        checked={workerModeEnabled}
+                        onChange={(e) => handleWorkerModeToggle(e.target.checked)}
+                        style={{ opacity: 0, width: 0, height: 0 }}
+                      />
+                      <span style={{
+                        position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                        backgroundColor: workerModeEnabled ? 'var(--color-primary)' : 'rgba(255,255,255,0.2)',
+                        transition: '0.2s', borderRadius: '24px'
+                      }}>
+                        <span style={{
+                          position: 'absolute', height: '18px', width: '18px', left: '3px', bottom: '3px',
+                          backgroundColor: 'white', transition: '0.2s', borderRadius: '50%',
+                          transform: workerModeEnabled ? 'translateX(20px)' : 'none'
+                        }} />
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Test Worker button */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      type="button"
+                      id="btn-test-worker"
+                      onClick={handleTestWorker}
+                      disabled={workerTestStatus === 'testing'}
+                      className="btn secondary"
+                      style={{ display: 'flex', gap: '8px', alignItems: 'center', alignSelf: 'flex-start' }}
+                    >
+                      {workerTestStatus === 'testing' && <RefreshCw size={14} className="animate-spin" />}
+                      <span>Test Worker Connection</span>
+                    </button>
+
+                    {workerTestStatus === 'success' && (
+                      <div className="alert-banner success" style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.2)', color: 'var(--color-secondary)', margin: 0 }}>
+                        <CheckCircle2 size={15} />
+                        <span>{workerTestMsg}</span>
+                      </div>
+                    )}
+                    {workerTestStatus === 'error' && (
+                      <div className="alert-banner warning" style={{ backgroundColor: 'rgba(244, 63, 94, 0.1)', borderColor: 'rgba(244, 63, 94, 0.2)', color: 'var(--color-danger)', margin: 0 }}>
+                        <XCircle size={15} />
+                        <span><strong>Test Failed:</strong> {workerTestMsg}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Info note */}
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+                    <strong>How it works:</strong> On initial load the Worker calls the Tuya API server-side and returns a single aggregated JSON response (sensors + power meter + 24 h history). Subsequent real-time power readings are fetched every second through the Worker’s <code>/proxy</code> endpoint, which forwards requests to your local TV Box daemon and adds the required CORS headers.
+                  </p>
+                </div>
+              )}
+            </section>
+
+          </div>
 
           {/* Firebase Sync Settings & Custom Codes */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

@@ -306,6 +306,15 @@ export const clearTokenCache = () => {
   localStorage.removeItem('tuya_token_expires_at');
 };
 
+// Worker mode toggle — device-local only, never synced to Firebase
+export const getWorkerModeEnabled = (): boolean => {
+  return localStorage.getItem('worker_mode_enabled') === 'true';
+};
+
+export const setWorkerModeEnabled = (val: boolean): void => {
+  localStorage.setItem('worker_mode_enabled', val ? 'true' : 'false');
+};
+
 // Get Tuya Access Token
 export const getAccessToken = async (config: TuyaConfig): Promise<string> => {
   const cachedToken = localStorage.getItem('tuya_access_token');

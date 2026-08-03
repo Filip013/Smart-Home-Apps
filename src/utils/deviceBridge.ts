@@ -1,4 +1,5 @@
-import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats, fetchFirestoreDayPowerStats, fetchFirestoreDayClimateStats } from './tuyaService';
+import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats, fetchFirestoreDayPowerStats, fetchFirestoreDayClimateStats, getWorkerModeEnabled } from './tuyaService';
+import { fetchAllDeviceDataFromWorker } from './workerService';
 import type { TempSensor, PowerMeter } from './mockData';
 
 
@@ -533,6 +534,17 @@ export const fetchAllDeviceData = async (): Promise<{
   sensors: TempSensor[];
   power: PowerMeter | null;
 }> => {
+  // Worker mode: delegate to the Cloudflare Worker BFF for a single aggregated fetch.
+  // Called only on initial load or manual refresh — never polled.
+  if (getWorkerModeEnabled()) {
+    try {
+      return await fetchAllDeviceDataFromWorker();
+    } catch (err) {
+      console.error('Worker fetch failed, falling back to local Tuya calls:', err);
+      // Fall through to local logic below
+    }
+  }
+
   const live = await isLiveMode();
   if (!live) {
     return {
