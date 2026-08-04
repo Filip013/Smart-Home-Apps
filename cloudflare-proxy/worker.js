@@ -659,9 +659,13 @@ export default {
         const config = await getConfig(env, url);
         const creds = { clientId: config.clientId, clientSecret: config.clientSecret, region: config.region };
         
-        let primaryTemp = null, primaryHum = null, activePowerWatts = 0;
+        let primaryTemp = null, primaryHum = null;
+        let secondaryTemp = null, secondaryHum = null;
+        let activePowerWatts = 0;
 
         const tasks = [];
+        
+        // Fetch Belgrade (Sensor 1)
         if (config.tempDeviceId1) {
           tasks.push(makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId1}/status`, 'GET', null, creds)
             .then(res => {
@@ -673,6 +677,19 @@ export default {
             }).catch(() => {}));
         }
 
+        // Fetch Vršac (Sensor 2)
+        if (config.tempDeviceId2) {
+          tasks.push(makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId2}/status`, 'GET', null, creds)
+            .then(res => {
+              const status = res.result || [];
+              const tempVal = status.find(s => s.code === config.tempCode2 || s.code === 'temp_current')?.value;
+              const humVal = status.find(s => s.code === config.humCode2 || s.code === 'humidity_value')?.value;
+              if (tempVal !== undefined) secondaryTemp = scaleTemp(tempVal);
+              if (humVal !== undefined) secondaryHum = scaleHumidity(humVal);
+            }).catch(() => {}));
+        }
+
+        // Fetch Power
         if (config.powerDeviceId) {
           tasks.push(makeTuyaRequest(env, `/v1.0/devices/${config.powerDeviceId}/status`, 'GET', null, creds)
             .then(res => {
@@ -687,8 +704,8 @@ export default {
         return new Response(JSON.stringify({
           success: true,
           timestamp: Math.floor(Date.now() / 1000),
-          temp: primaryTemp,
-          humidity: primaryHum,
+          belgrade: { temp: primaryTemp, humidity: primaryHum },
+          vrsac: { temp: secondaryTemp, humidity: secondaryHum },
           powerWatts: activePowerWatts
         }), { headers: corsHeaders() });
       }
