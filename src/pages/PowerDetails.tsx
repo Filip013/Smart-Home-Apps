@@ -470,7 +470,7 @@ export const PowerDetails: React.FC = () => {
         date: todayDateStr,
         kwh: powerData.todayKwh,
         peakKw: Number((todayMaxWatts / 1000.0).toFixed(2)),
-        cost: todayCostRSD,
+        cost: calculateDailyCostRSD(powerData.todayKwh),
         hourly: []
       });
     }
