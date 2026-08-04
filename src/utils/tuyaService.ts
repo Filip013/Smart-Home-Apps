@@ -166,6 +166,11 @@ export const saveTuyaConfig = async (config: TuyaConfig): Promise<void> => {
   const user = auth.currentUser;
   if (user) {
     try {
+      // 1. Make the parent User document "real" so the Python script can see it
+      const userRef = doc(db, 'artifacts', 'smart-home-apps', 'users', user.uid);
+      await setDoc(userRef, { initialized: true, uid: user.uid }, { merge: true });
+
+      // 2. Save the Tuya settings in the subcollection
       const docRef = doc(db, 'artifacts', 'smart-home-apps', 'users', user.uid, 'settings', 'tuya');
       await setDoc(docRef, config);
     } catch (e) {
