@@ -48,11 +48,18 @@ const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
   return kwh * 10.66;
 };
 
-const calculateTodayCostRSD = (hourlyHistory: any[]) => {
+/**
+ * Calculates today's cost in RSD from a per-hour kWh array (index = hour 0–23).
+ * Uses the Belgrade High/Low Tariff schedule:
+ *   Low  (00:00–07:59): 4.15 RSD/kWh
+ *   High (08:00–23:59): 13.45 RSD/kWh
+ *
+ * The array must cover midnight-to-now (i.e. sourced from Firestore today logs),
+ * NOT from the rolling 24-hour hourlyHistory window which includes yesterday.
+ */
+const calculateTodayCostFromHourlyKwh = (hourlyKwh: number[]) => {
   let totalCost = 0;
-  hourlyHistory.forEach(h => {
-    const hour = parseInt(h.time.split(':')[0], 10);
-    const kwh = h.loadWatts / 1000.0;
+  hourlyKwh.forEach((kwh, hour) => {
     if (hour >= 0 && hour < 8) {
       totalCost += kwh * 4.15;
     } else {
@@ -431,7 +438,8 @@ export const PowerDetails: React.FC = () => {
   };
 
   // Cost calculations in RSD based on High/Low tariffs
-  const todayCostRSD = powerData ? calculateTodayCostRSD(powerData.hourlyHistory) : 0;
+  // todayCostRSD is computed further below after baseHourlyPower is assembled from Firestore logs.
+  // We initialise to 0 here; the real value is derived from the hourly kWh breakdown.
   
   const monthlyCostRSD = powerData
     ? powerData.dailyHistory
@@ -567,6 +575,8 @@ export const PowerDetails: React.FC = () => {
     baseHourlyPower[currentHour] = Number(currentHourKwh.toFixed(3));
   }
 
+  // todayCostRSD is computed after isToday is declared below.
+
   const historicalHourlyPowerData = baseHourlyPower.map((kwh: number, hour: number) => ({
     time: `${hour.toString().padStart(2, '0')}:00`,
     kwh
@@ -582,6 +592,11 @@ export const PowerDetails: React.FC = () => {
     : [];
 
   const isToday = selectedDate === today;
+
+  // Derive today's cost from baseHourlyPower (midnight-to-now per-hour kWh array).
+  // baseHourlyPower[h] = kWh consumed in local calendar hour h, sourced from Firestore today logs.
+  // Using hourlyHistory (rolling 24h watt window) would wrongly include yesterday's evening hours.
+  const todayCostRSD = isToday ? calculateTodayCostFromHourlyKwh(baseHourlyPower) : 0;
 
   // Selected Month Energy Total (dynamic based on selectedMonth)
   const selectedMonthDays = baseDailyHistory.filter(d => d.date.startsWith(selectedMonth));
