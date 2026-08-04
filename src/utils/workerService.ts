@@ -14,6 +14,7 @@
  */
 
 import { getCachedTuyaConfig } from './tuyaService';
+import { fetchRealDailyPowerStats } from './deviceBridge';
 import type { TempSensor, PowerMeter } from './mockData';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -37,6 +38,10 @@ function buildAuthHeader(secret: string | undefined): string | undefined {
 /**
  * Calls the worker's GET /api/status endpoint with all device config params
  * forwarded as query parameters, then maps the response to the local type shapes.
+ *
+ * Sourced data responsibilities:
+ *  - Worker: 24h real-time sensor/power status and hourly history
+ *  - Firestore: Daily energy history, week/month kWh totals, and billing stats (same as local API)
  *
  * Called ONCE on initial page load or manual refresh — never polled.
  */
@@ -113,10 +118,15 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
   let power: PowerMeter | null = null;
   if (data.power) {
     const p = data.power;
-    const monthKwh = Number(p.monthKwh) || 0;
+    const powerDeviceId = p.id || config.powerDeviceId || 'power-meter';
+    const energyCode = config.energyCode || 'add_ele';
+    const todayKwh = Number(p.todayKwh) || 0;
 
-    // estMonthlyCost and breakdown are no longer returned by the worker.
-    // Compute them locally using the same formulas as deviceBridge.ts.
+    // Sourced directly from Firestore (same as local API in deviceBridge.ts)
+    const dailyHistory = await fetchRealDailyPowerStats(powerDeviceId, energyCode);
+
+    const weekKwh = Number(dailyHistory.slice(-7).reduce((acc, d) => acc + d.kwh, 0).toFixed(1));
+    const monthKwh = Number(dailyHistory.reduce((acc, d) => acc + d.kwh, 0).toFixed(1)) || todayKwh;
     const estMonthlyCost = Number((monthKwh * 0.15).toFixed(2));
     const breakdown = [
       { name: 'Heating & Cooling',        percentage: 38, kwh: Number((monthKwh * 0.38).toFixed(1)), color: 'var(--color-primary)' },
@@ -126,13 +136,13 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
     ];
 
     power = {
-      id:              p.id   || config.powerDeviceId || 'power-meter',
+      id:              powerDeviceId,
       name:            p.name || config.powerName     || 'Main Grid Meter',
       currentLoad:     Number(p.currentLoad)  || 0,
       voltage:         Number(p.voltage)      || 0,
       currentAmps:     Number(p.currentAmps)  || 0,
-      todayKwh:        Number(p.todayKwh)     || 0,
-      weekKwh:         Number(p.weekKwh)      || 0,
+      todayKwh,
+      weekKwh,
       monthKwh,
       estMonthlyCost,
       hourlyHistory:   Array.isArray(p.hourlyHistory) ? p.hourlyHistory.map((h: any) => ({
@@ -141,10 +151,7 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
         voltage:     Number(h.voltage)     || 0,
         currentAmps: Number(h.currentAmps) || 0,
       })) : [],
-      // Worker returns dailyHistory as [] — Firestore-sourced daily history is not
-      // available through the worker, so keep empty and let the page fall back to
-      // its own Firestore fetch if needed.
-      dailyHistory: [],
+      dailyHistory,
       breakdown,
     };
   }

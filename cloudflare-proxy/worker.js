@@ -599,17 +599,8 @@ export default {
                 currentAmps,
                 todayKwh,
                 energyDebug,
-                weekKwh: Number((todayKwh * 7).toFixed(1)),
-                monthKwh: Number((todayKwh * 30).toFixed(1)),
-                estMonthlyCost: Number((todayKwh * 30 * 0.15).toFixed(2)),
                 hourlyHistory,
-                dailyHistory: [],
-                breakdown: [
-                  { name: 'Heating & Cooling', percentage: 38, kwh: Number((todayKwh * 30 * 0.38).toFixed(1)), color: 'var(--color-primary)' },
-                  { name: 'Major Appliances', percentage: 27, kwh: Number((todayKwh * 30 * 0.27).toFixed(1)), color: 'var(--color-secondary)' },
-                  { name: 'Lighting & Smart Devices', percentage: 19, kwh: Number((todayKwh * 30 * 0.19).toFixed(1)), color: 'var(--color-accent)' },
-                  { name: 'Standby / Other Devices', percentage: 16, kwh: Number((todayKwh * 30 * 0.16).toFixed(1)), color: 'var(--color-warning)' }
-                ]
+                dailyHistory: []
               };
             } catch (err) {
               powerErr = err.message || String(err);

@@ -126,7 +126,7 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       const tokenPromise = invoke<string>('start_auth_server');
 
       // 2. Open default browser (fall back to window.open if plugin-opener fails)
-      openUrl(authProxyUrl).catch((err) => {
+      openUrl(authProxyUrl).catch((err: any) => {
         console.warn("openUrl failed, falling back to window.open:", err);
         window.open(authProxyUrl, '_blank');
       });

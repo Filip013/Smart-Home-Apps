@@ -3,10 +3,15 @@ import sys
 import json
 import hmac
 import hashlib
-import calendar
+import urllib.parse
+from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo
+    BELGRADE_TZ = ZoneInfo("Europe/Belgrade")
+except Exception:
+    BELGRADE_TZ = timezone(timedelta(hours=2))
+
 import requests
-from datetime import datetime, timedelta, time, timezone
-from zoneinfo import ZoneInfo
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -16,13 +21,24 @@ client_secret = os.environ.get('TUYA_CLIENT_SECRET')
 user_uid = os.environ.get('FIREBASE_USER_UID')
 service_account_str = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
 
-if not all([client_id, client_secret, user_uid, service_account_str]):
-    print("Error: Missing required environment variables (secrets).")
+required_secrets = {
+    'TUYA_CLIENT_ID': client_id,
+    'TUYA_CLIENT_SECRET': client_secret,
+    'FIREBASE_USER_UID': user_uid,
+    'FIREBASE_SERVICE_ACCOUNT': service_account_str
+}
+
+missing_secrets = [key for key, val in required_secrets.items() if not val or not str(val).strip()]
+if missing_secrets:
+    print(f"Error: Missing required environment variables (secrets): {', '.join(missing_secrets)}")
     sys.exit(1)
 
 # Initialize Firebase Admin SDK
 try:
     service_account_info = json.loads(service_account_str)
+    if isinstance(service_account_info, dict) and 'private_key' in service_account_info:
+        service_account_info['private_key'] = service_account_info['private_key'].replace('\\n', '\n')
+    
     cred = credentials.Certificate(service_account_info)
     firebase_admin.initialize_app(cred)
     db = firestore.client()
@@ -53,7 +69,7 @@ domain_map = {
 target_domain = domain_map.get(region_code, 'openapi.tuyaeu.com')
 
 # Target dates to process explicitly: Yesterday (full 24h) and Today so far
-now_belgrade = datetime.now(ZoneInfo("Europe/Belgrade"))
+now_belgrade = datetime.now(BELGRADE_TZ)
 today_date = now_belgrade.date()
 yesterday_date = today_date - timedelta(days=1)
 
@@ -71,7 +87,7 @@ def get_hmac_sha256(key, message):
     return hmac.new(key.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest().upper()
 
 def make_tuya_request(path, method='GET', body=None, token=''):
-    t = str(int(datetime.utcnow().timestamp() * 1000))
+    t = str(int(datetime.now(timezone.utc).timestamp() * 1000))
     content_sha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
     body_str = ''
     if body:
@@ -83,10 +99,15 @@ def make_tuya_request(path, method='GET', body=None, token=''):
     if '?' in path:
         base_path, query_str = path.split('?', 1)
         params = [p.split('=', 1) for p in query_str.split('&') if '=' in p]
-        params = [(p[0], requests.utils.unquote(p[1])) for p in params]
         params.sort(key=lambda x: x[0])
-        sorted_query = '&'.join([f"{p[0]}={p[1]}" for p in params])
-        sorted_path = f"{base_path}?{sorted_query}"
+        
+        # Build encoded query string for the HTTP request URL
+        sorted_url_query = '&'.join([f"{p[0]}={p[1]}" for p in params])
+        path = f"{base_path}?{sorted_url_query}"
+        
+        # Build decoded query string for the HMAC signature
+        decoded_query = '&'.join([f"{p[0]}={urllib.parse.unquote(p[1])}" for p in params])
+        sorted_path = f"{base_path}?{decoded_query}"
 
     string_to_sign = f"{method}\n{content_sha}\n\n{sorted_path}"
     sign_str = f"{client_id}{token}{t}{string_to_sign}"
@@ -125,7 +146,7 @@ if power_device_id:
     for date_str in target_dates:
         # Determine exact 24h local calendar day bounds in Belgrade (00:00:00 to 23:59:59)
         year, month, day = map(int, date_str.split('-'))
-        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=ZoneInfo("Europe/Belgrade"))
+        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=BELGRADE_TZ)
         dt_end = dt_start + timedelta(days=1)
         
         start_ms = int(dt_start.timestamp() * 1000)
@@ -141,7 +162,7 @@ if power_device_id:
         err_msg = ""
         
         while has_more and page_count < 10:
-            row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+            row_key_param = f"&last_row_key={urllib.parse.quote(last_row_key)}" if last_row_key else ""
             path = f"/v2.0/cloud/thing/{power_device_id}/report-logs?codes={energy_code}&start_time={start_ms}&end_time={end_ms}&size=100{row_key_param}"
             res = make_tuya_request(path, 'GET', None, access_token)
             
@@ -155,7 +176,7 @@ if power_device_id:
             logs.extend(page_logs)
             
             has_more = result_data.get('has_more', False)
-            last_row_key = result_data.get('last_row_key', '')
+            last_row_key = result_data.get('next_row_key') or result_data.get('last_row_key') or ''
             page_count += 1
             
             if not page_logs or not last_row_key:
@@ -167,7 +188,7 @@ if power_device_id:
             by_hour = [0.0] * 24
             for log in logs:
                 dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
-                dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+                dt_local = dt_utc.astimezone(BELGRADE_TZ)
                 if 0 <= dt_local.hour < 24:
                     by_hour[dt_local.hour] += float(log['value'])
 
@@ -229,7 +250,7 @@ for sensor in sensors:
     
     for date_str in target_dates:
         year, month, day = map(int, date_str.split('-'))
-        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=ZoneInfo("Europe/Belgrade"))
+        dt_start = datetime(year, month, day, 0, 0, 0, tzinfo=BELGRADE_TZ)
         dt_end = dt_start + timedelta(days=1)
         
         start_ms = int(dt_start.timestamp() * 1000)
@@ -243,7 +264,7 @@ for sensor in sensors:
         err_msg = ""
         
         while has_more and page_count < 10:
-            row_key_param = f"&last_row_key={requests.utils.quote(last_row_key)}" if last_row_key else ""
+            row_key_param = f"&last_row_key={urllib.parse.quote(last_row_key)}" if last_row_key else ""
             path = f"/v2.0/cloud/thing/{sensor['id']}/report-logs?codes={codes_str}&start_time={start_ms}&end_time={end_ms}&size=100{row_key_param}"
             res = make_tuya_request(path, 'GET', None, access_token)
             
@@ -257,7 +278,7 @@ for sensor in sensors:
             logs.extend(page_logs)
             
             has_more = result_data.get('has_more', False)
-            last_row_key = result_data.get('last_row_key', '')
+            last_row_key = result_data.get('next_row_key') or result_data.get('last_row_key') or ''
             page_count += 1
             
             if not page_logs or not last_row_key:
@@ -274,7 +295,7 @@ for sensor in sensors:
                 climate_data = doc_data.get('sensors', {})
                 sensor_stats = climate_data.get(sensor['key'], {})
                 hourly_list = sensor_stats.get('hourly', [])
-                hourly_dict = {item['hour']: item for item in hourly_list}
+                hourly_dict = {int(item['hour']): item for item in hourly_list if 'hour' in item}
             else:
                 climate_data = {}
                 sensor_stats = {}
@@ -287,7 +308,7 @@ for sensor in sensors:
             for log in logs:
                 val = float(log['value'])
                 dt_utc = datetime.fromtimestamp(int(log['event_time']) / 1000.0, tz=timezone.utc)
-                dt_local = dt_utc.astimezone(ZoneInfo("Europe/Belgrade"))
+                dt_local = dt_utc.astimezone(BELGRADE_TZ)
                 h = dt_local.hour
                 if log['code'] == sensor['temp_code']:
                     val_scaled = val / 10.0 if val > 100.0 else val
@@ -317,8 +338,15 @@ for sensor in sensors:
             for h in range(24):
                 has_data = len(by_hour[h]['temps']) > 0 or len(by_hour[h]['hums']) > 0
                 if has_data:
-                    h_temp = sum(by_hour[h]['temps']) / len(by_hour[h]['temps']) if len(by_hour[h]['temps']) > 0 else (hourly_dict.get(h, {}).get('temp') or last_temp)
-                    h_hum = sum(by_hour[h]['hums']) / len(by_hour[h]['hums']) if len(by_hour[h]['hums']) > 0 else (hourly_dict.get(h, {}).get('humidity') or last_hum)
+                    fallback_temp = hourly_dict.get(h, {}).get('temp')
+                    if fallback_temp is None:
+                        fallback_temp = last_temp
+                    h_temp = sum(by_hour[h]['temps']) / len(by_hour[h]['temps']) if len(by_hour[h]['temps']) > 0 else fallback_temp
+
+                    fallback_hum = hourly_dict.get(h, {}).get('humidity')
+                    if fallback_hum is None:
+                        fallback_hum = last_hum
+                    h_hum = sum(by_hour[h]['hums']) / len(by_hour[h]['hums']) if len(by_hour[h]['hums']) > 0 else fallback_hum
                     
                     hourly_dict[h] = {
                         'hour': h,
