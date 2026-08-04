@@ -225,10 +225,14 @@ export const fetchLiveTempSensor = async (
 };
 
 // Query actual 24h power consumption logs from Tuya OpenAPI (paginating using V2 API to ensure we get full 24h of data)
+// Prefers cur_power averages when present; fills silent hours from add_ele energy
+// increments (Wh per hour ≈ average watts). Never carries forward stale loads:
+// an hour with no reports while the consumer is off must read 0W, not the last load.
 export const fetchRealPowerHistory = async (
   deviceId: string,
   powerCode: string,
-  fallbackLoad: number = 0
+  fallbackLoad: number = 0,
+  energyCode: string = 'add_ele'
 ): Promise<{ time: string; loadWatts: number; voltage: number; currentAmps: number }[]> => {
   try {
     // Tuya logs query expects Unix milliseconds (13 digits)
@@ -242,14 +246,14 @@ export const fetchRealPowerHistory = async (
 
     // Group logs into hourly buckets in chronological order (from 23 hours ago to current hour)
     const now = new Date();
-    const buckets: { hourStr: string; startMs: number; endMs: number; loads: number[] }[] = [];
+    const buckets: { hourStr: string; startMs: number; endMs: number; loads: number[]; energyWh: number[] }[] = [];
     
     for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 60 * 60 * 1000);
       const hourStr = `${d.getHours().toString().padStart(2, '0')}:00`;
       const startMs = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0).getTime();
       const endMs = startMs + 60 * 60 * 1000;
-      buckets.push({ hourStr, startMs, endMs, loads: [] });
+      buckets.push({ hourStr, startMs, endMs, loads: [], energyWh: [] });
     }
 
     // Paginate using V2 API to retrieve up to 10 pages (1000 logs max)
@@ -278,13 +282,53 @@ export const fetchRealPowerHistory = async (
       }
     }
 
+    // Fetch add_ele over the same 24h window, so hours without cur_power reports
+    // (e.g. consumer off / steady draw) can be filled from energy deltas.
+    let energyLogs: any[] = [];
+    try {
+      let energyLastRowKey = '';
+      let energyHasMore = true;
+      let energyPageCount = 0;
+
+      while (energyHasMore && energyPageCount < 10) {
+        const energyRowKeyParam = energyLastRowKey ? `&last_row_key=${encodeURIComponent(energyLastRowKey)}` : '';
+        const energyRes = await makeTuyaRequest(
+          `/v2.0/cloud/thing/${deviceId}/report-logs?codes=${energyCode}&start_time=${startTime}&end_time=${endTime}&size=100${energyRowKeyParam}`,
+          'GET'
+        );
+
+        if (energyRes && energyRes.success === false) {
+          console.warn(`Tuya API returned success:false for Energy Logs: ${energyRes.msg}`);
+          break;
+        }
+
+        const energyPageLogs = energyRes?.result?.logs || [];
+        energyLogs = energyLogs.concat(energyPageLogs);
+
+        energyHasMore = energyRes?.result?.has_more || false;
+        energyLastRowKey = energyRes?.result?.last_row_key || '';
+        energyPageCount++;
+
+        if (energyPageLogs.length === 0 || !energyLastRowKey) {
+          break;
+        }
+      }
+    } catch (energyErr) {
+      console.warn("Failed to fetch 24h energy logs, falling back to cur_power only:", energyErr);
+    }
+
     if (allLogs.length === 0) {
-      return buckets.map(b => ({
-        time: b.hourStr,
-        loadWatts: fallbackLoad,
-        voltage: fallbackLoad > 0 ? 230 : 0,
-        currentAmps: fallbackLoad > 0 ? Number((fallbackLoad / 230).toFixed(2)) : 0
-      }));
+      // No cur_power reports at all in 24h — device in steady state (typically off).
+      // Only fall back to the live reading when there are no energy logs either;
+      // otherwise the add_ele fill below handles silent hours correctly.
+      if (energyLogs.length === 0) {
+        return buckets.map(b => ({
+          time: b.hourStr,
+          loadWatts: fallbackLoad,
+          voltage: fallbackLoad > 0 ? 230 : 0,
+          currentAmps: fallbackLoad > 0 ? Number((fallbackLoad / 230).toFixed(2)) : 0
+        }));
+      }
     }
 
     const pLogs = allLogs;
@@ -297,27 +341,26 @@ export const fetchRealPowerHistory = async (
       }
     });
 
-    let currentLoad: number | null = null;
-
-    const mapped = buckets.map(b => {
-      const avgLoad = b.loads.length > 0 
-        ? Math.round(b.loads.reduce((acc: number, val: number) => acc + val, 0) / b.loads.length)
-        : null;
-
-      if (avgLoad !== null) currentLoad = avgLoad;
-
-      return {
-        time: b.hourStr,
-        loadWatts: currentLoad
-      };
+    // Bucket add_ele energy increments (values in Wh) to fill hours with no cur_power reports
+    energyLogs.forEach((log: any) => {
+      const eventMs = Number(log.event_time);
+      const bucket = buckets.find(b => eventMs >= b.startMs && eventMs < b.endMs);
+      if (bucket) {
+        const v = Number(log.value);
+        if (!isNaN(v) && v > 0) bucket.energyWh.push(v);
+      }
     });
 
-    const firstValidLoad = mapped.find(m => m.loadWatts !== null)?.loadWatts ?? fallbackLoad;
-
-    return mapped.map(m => {
-      const loadWatts = m.loadWatts !== null ? m.loadWatts : firstValidLoad;
+    return buckets.map(b => {
+      let loadWatts = 0;
+      if (b.loads.length > 0) {
+        loadWatts = Math.round(b.loads.reduce((acc: number, val: number) => acc + val, 0) / b.loads.length);
+      } else if (b.energyWh.length > 0) {
+        // Wh consumed in this hour ≈ average watts for the hour
+        loadWatts = Math.round(b.energyWh.reduce((acc: number, val: number) => acc + val, 0));
+      }
       return {
-        time: m.time,
+        time: b.hourStr,
         loadWatts,
         voltage: loadWatts > 0 ? 230 : 0,
         currentAmps: loadWatts > 0 ? Number((loadWatts / 230).toFixed(2)) : 0
@@ -438,7 +481,7 @@ export const fetchLivePowerMeter = async (
     }
 
     // Fetch actual real logs
-    const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode, currentLoad);
+    const hourlyHistory = await fetchRealPowerHistory(deviceId, pCode, currentLoad, eCode);
     const dailyHistory = await fetchRealDailyPowerStats(deviceId, eCode);
 
     const weekKwh = Number(dailyHistory.slice(-7).reduce((acc, d) => acc + d.kwh, 0).toFixed(1));

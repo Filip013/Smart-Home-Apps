@@ -347,7 +347,10 @@ function processTempHistory(logs, fallbackTemp = 0, fallbackHum = 0, tCode = 'va
 }
 
 // Process 24-Hour Power Logs into Normalized Buckets
-function processPowerHistory(logs, fallbackLoad = 0, pCode = 'cur_power', timezone = 'Europe/Belgrade') {
+// Prefers cur_power averages when present; fills silent hours from add_ele energy
+// increments (Wh per hour ≈ average watts). Never carries forward stale loads:
+// an hour with no reports while the consumer is off must read 0W, not the last load.
+function processPowerHistory(logs, fallbackLoad = 0, pCode = 'cur_power', timezone = 'Europe/Belgrade', energyLogs = []) {
   const now = new Date();
   const buckets = [];
   
@@ -363,7 +366,7 @@ function processPowerHistory(logs, fallbackLoad = 0, pCode = 'cur_power', timezo
     const startMs = getTzStartMs(d, timezone);
     const endMs = startMs + 60 * 60 * 1000;
     const hourStr = hourFormatter.format(new Date(startMs));
-    buckets.push({ hourStr, startMs, endMs, loads: [] });
+    buckets.push({ hourStr, startMs, endMs, loads: [], energyWh: [] });
   }
 
   logs.forEach(log => {
@@ -376,12 +379,24 @@ function processPowerHistory(logs, fallbackLoad = 0, pCode = 'cur_power', timezo
     }
   });
 
-  let currentLoad = null;
-  return buckets.map(b => {
-    if (b.loads.length > 0) {
-      currentLoad = Math.round(b.loads.reduce((a, v) => a + v, 0) / b.loads.length);
+  // Bucket add_ele energy increments (values in Wh) to fill hours with no cur_power reports
+  energyLogs.forEach(log => {
+    const eventMs = Number(log.event_time);
+    const bucket = buckets.find(b => eventMs >= b.startMs && eventMs < b.endMs);
+    if (bucket) {
+      const v = Number(log.value);
+      if (!isNaN(v) && v > 0) bucket.energyWh.push(v);
     }
-    const loadWatts = currentLoad !== null ? currentLoad : 0;
+  });
+
+  return buckets.map(b => {
+    let loadWatts = 0;
+    if (b.loads.length > 0) {
+      loadWatts = Math.round(b.loads.reduce((a, v) => a + v, 0) / b.loads.length);
+    } else if (b.energyWh.length > 0) {
+      // Wh consumed in this hour ≈ average watts for the hour
+      loadWatts = Math.round(b.energyWh.reduce((a, v) => a + v, 0));
+    }
     return {
       time: b.hourStr,
       loadWatts,
@@ -564,7 +579,15 @@ export default {
               const currentAmps = iVal !== undefined ? Number(scaleCurrent(iVal).toFixed(2)) : (currentLoad > 0 ? Number((currentLoad / 230).toFixed(2)) : 0);
 
               const logs = await fetchAllReportLogs(env, config.powerDeviceId, config.powerCode, startTime, endTime, creds);
-              const hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone);
+              // Fetch add_ele over the full 24h window too, so hours without cur_power
+              // reports (e.g. consumer off / steady draw) can be filled from energy deltas.
+              let energyLogs24h = [];
+              try {
+                energyLogs24h = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, startTime, endTime, creds);
+              } catch (energyErr) {
+                console.error('Error fetching 24h energy logs:', energyErr);
+              }
+              const hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone, energyLogs24h);
 
               let todayKwh = 0;
               let energyDebug = { path: 'none', energyLogsCount: 0, sumRaw: 0, midnight: 0, eVal: eVal };
