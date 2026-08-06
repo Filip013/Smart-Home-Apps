@@ -14,7 +14,6 @@ class SettingsService {
   static const String _keyPowerDeviceName = 'power_device_name';
   static const String _keyPowerDeviceLoc = 'power_device_loc';
   static const String _keyTvBoxUrl = 'tv_box_url';
-  static const String _keyCostPerKwh = 'cost_per_kwh';
   static const String _keyFirestoreUserId = 'firestore_user_id';
   static const String _keyClientId = 'tuya_client_id';
   static const String _keyClientSecret = 'tuya_client_secret';
@@ -34,7 +33,6 @@ class SettingsService {
   String _memPowerDeviceName = 'Power Monitor';
   String _memPowerDeviceLoc = 'Belgrade';
   String _memTvBoxUrl = 'http://filip013.duckdns.org/live';
-  double _memCostPerKwh = 10.66;
   String _memFirestoreUserId = '';
   String _memClientId = '';
   String _memClientSecret = '';
@@ -64,11 +62,6 @@ class SettingsService {
   String get powerDeviceName => _prefs?.getString(_keyPowerDeviceName) ?? _memPowerDeviceName;
   String get powerDeviceLoc => _prefs?.getString(_keyPowerDeviceLoc) ?? _memPowerDeviceLoc;
   String get tvBoxUrl => _prefs?.getString(_keyTvBoxUrl) ?? _memTvBoxUrl;
-  double get costPerKwh {
-    final v = _prefs?.getDouble(_keyCostPerKwh) ?? _memCostPerKwh;
-    // 0.15 was the inherited EUR placeholder — not a valid RSD tariff.
-    return v == 0.15 ? 10.66 : v;
-  }
   String get firestoreUserId => _prefs?.getString(_keyFirestoreUserId) ?? _memFirestoreUserId;
   String get clientId => _prefs?.getString(_keyClientId) ?? _memClientId;
   String get clientSecret => _prefs?.getString(_keyClientSecret) ?? _memClientSecret;
@@ -87,7 +80,6 @@ class SettingsService {
     required String powerDeviceName,
     required String powerDeviceLoc,
     required String tvBoxUrl,
-    required double costPerKwh,
     required String firestoreUserId,
     required String clientId,
     required String clientSecret,
@@ -105,7 +97,6 @@ class SettingsService {
     _memPowerDeviceName = powerDeviceName.trim();
     _memPowerDeviceLoc = powerDeviceLoc.trim();
     _memTvBoxUrl = tvBoxUrl.trim();
-    _memCostPerKwh = costPerKwh;
     _memFirestoreUserId = firestoreUserId.trim();
     _memClientId = clientId.trim();
     _memClientSecret = clientSecret.trim();
@@ -126,7 +117,6 @@ class SettingsService {
         await prefs.setString(_keyPowerDeviceName, _memPowerDeviceName);
         await prefs.setString(_keyPowerDeviceLoc, _memPowerDeviceLoc);
         await prefs.setString(_keyTvBoxUrl, _memTvBoxUrl);
-        await prefs.setDouble(_keyCostPerKwh, _memCostPerKwh);
         await prefs.setString(_keyFirestoreUserId, _memFirestoreUserId);
         await prefs.setString(_keyClientId, _memClientId);
         await prefs.setString(_keyClientSecret, _memClientSecret);

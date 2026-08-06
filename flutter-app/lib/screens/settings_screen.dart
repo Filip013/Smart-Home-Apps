@@ -28,7 +28,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _powerDeviceNameController;
   late TextEditingController _powerDeviceLocController;
   late TextEditingController _tvBoxUrlController;
-  late TextEditingController _costController;
   late TextEditingController _firestoreUidController;
   late TextEditingController _clientIdController;
   late TextEditingController _clientSecretController;
@@ -49,7 +48,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _powerDeviceNameController = TextEditingController(text: widget.settingsService.powerDeviceName);
     _powerDeviceLocController = TextEditingController(text: widget.settingsService.powerDeviceLoc);
     _tvBoxUrlController = TextEditingController(text: widget.settingsService.tvBoxUrl);
-    _costController = TextEditingController(text: widget.settingsService.costPerKwh.toString());
     _firestoreUidController = TextEditingController(text: widget.settingsService.firestoreUserId);
     _clientIdController = TextEditingController(text: widget.settingsService.clientId);
     _clientSecretController = TextEditingController(text: widget.settingsService.clientSecret);
@@ -70,7 +68,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _powerDeviceNameController.dispose();
     _powerDeviceLocController.dispose();
     _tvBoxUrlController.dispose();
-    _costController.dispose();
     _firestoreUidController.dispose();
     _clientIdController.dispose();
     _clientSecretController.dispose();
@@ -79,7 +76,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _save() async {
-    final cost = double.tryParse(_costController.text) ?? 0.15;
     await widget.settingsService.saveSettings(
       workerUrl: _workerUrlController.text,
       authToken: _authTokenController.text,
@@ -93,7 +89,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       powerDeviceName: _powerDeviceNameController.text,
       powerDeviceLoc: _powerDeviceLocController.text,
       tvBoxUrl: _tvBoxUrlController.text,
-      costPerKwh: cost,
       firestoreUserId: _firestoreUidController.text,
       clientId: _clientIdController.text,
       clientSecret: _clientSecretController.text,
@@ -266,20 +261,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 24),
 
-            _buildSectionHeader('Local TV Box Power Daemon & Rates'),
+            _buildSectionHeader('Local TV Box Power Daemon'),
             const SizedBox(height: 12),
             _buildTextField(
               controller: _tvBoxUrlController,
               label: 'Local TV Box URL',
               icon: LucideIcons.server,
-              isDark: isDark,
-            ),
-            const SizedBox(height: 16),
-            _buildTextField(
-              controller: _costController,
-              label: 'Electricity Rate (Cost per kWh in RSD)',
-              icon: LucideIcons.banknote,
-              keyboardType: TextInputType.number,
               isDark: isDark,
             ),
             const SizedBox(height: 24),
