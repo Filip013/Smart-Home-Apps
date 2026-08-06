@@ -64,6 +64,48 @@ void main() {
       expect(sensor2['avgHumidity'], 51);
     });
 
+    test('parseClimateDoc maps a full REST doc into {date, sensors}', () {
+      final doc = <String, dynamic>{
+        'name':
+            'projects/x/databases/(default)/documents/artifacts/smart-home-apps/users/uid/climateHistory/2026-08-01',
+        'fields': {
+          'date': {'stringValue': '2026-08-01'},
+          'sensors': {
+            'mapValue': {
+              'fields': {
+                'sensor1': {
+                  'mapValue': {
+                    'fields': {
+                      'avgTemp': {'doubleValue': 26.6},
+                      'avgHumidity': {'integerValue': '53'},
+                    }
+                  }
+                },
+                'sensor2': {
+                  'mapValue': {
+                    'fields': {
+                      'avgTemp': {'doubleValue': 28.2},
+                      'avgHumidity': {'integerValue': '47'},
+                    }
+                  }
+                },
+              }
+            }
+          },
+        },
+      };
+
+      final parsed = FirestoreService.parseClimateDoc(doc);
+      expect(parsed['date'], '2026-08-01');
+      final sensors = parsed['sensors'] as Map<String, dynamic>;
+      final s1 = sensors['sensor1'] as Map<String, dynamic>;
+      expect(s1['avgTemp'], 26.6);
+      expect(s1['avgHumidity'], 53);
+      final s2 = sensors['sensor2'] as Map<String, dynamic>;
+      expect(s2['avgTemp'], 28.2);
+      expect(s2['avgHumidity'], 47);
+    });
+
     test('energyHistory doc unwraps kwh/peakKw/cost/hourly', () {
       final fields = <String, dynamic>{
         'kwh': {'doubleValue': 3.4},

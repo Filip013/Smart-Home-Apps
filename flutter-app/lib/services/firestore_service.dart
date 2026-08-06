@@ -110,20 +110,9 @@ class FirestoreService {
         final Map<String, dynamic> data = json.decode(response.body);
         final documents = data['documents'] as List<dynamic>? ?? [];
 
-        return documents.map((doc) {
-          final String name = doc['name'] ?? '';
-          final dateStr = name.split('/').last;
-          final fields = doc['fields'] as Map<String, dynamic>? ?? {};
-          final unwrapped = unwrapFields(fields);
-
-          return {
-            'date': dateStr,
-            'sensors': {
-              'sensor1': unwrapped['sensor1'] is Map ? unwrapped['sensor1'] : <String, dynamic>{},
-              'sensor2': unwrapped['sensor2'] is Map ? unwrapped['sensor2'] : <String, dynamic>{},
-            },
-          };
-        }).toList()
+        return documents
+            .map((doc) => parseClimateDoc(doc as Map<String, dynamic>))
+            .toList()
           ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
       }
     } catch (e) {
@@ -194,6 +183,31 @@ class FirestoreService {
   /// (stringValue/int/double/bool/map/array). Public so tests can verify it.
   static Map<String, dynamic> unwrapFields(Map<String, dynamic> fields) =>
       fields.map((k, v) => MapEntry(k, _unwrapField(v)));
+
+  /// Maps one Firestore REST climateHistory doc into
+  /// `{date, sensors: {sensor1: {...}, sensor2: {...}}}`. Note the sensor
+  /// data sits under the nested `sensors` key, not at the top level.
+  @visibleForTesting
+  static Map<String, dynamic> parseClimateDoc(Map<String, dynamic> doc) {
+    final String name = doc['name'] ?? '';
+    final dateStr = name.split('/').last;
+    final fields = doc['fields'] as Map<String, dynamic>? ?? {};
+    final unwrapped = unwrapFields(fields);
+    final sensorsMap = unwrapped['sensors'] is Map
+        ? unwrapped['sensors'] as Map<String, dynamic>
+        : <String, dynamic>{};
+    return {
+      'date': dateStr,
+      'sensors': {
+        'sensor1': sensorsMap['sensor1'] is Map
+            ? sensorsMap['sensor1']
+            : <String, dynamic>{},
+        'sensor2': sensorsMap['sensor2'] is Map
+            ? sensorsMap['sensor2']
+            : <String, dynamic>{},
+      },
+    };
+  }
 
   static dynamic _unwrapField(dynamic field) {
     if (field is! Map<String, dynamic>) return null;
