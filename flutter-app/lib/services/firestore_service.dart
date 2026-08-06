@@ -30,7 +30,7 @@ class FirestoreService {
           final String name = doc['name'] ?? '';
           final dateStr = name.split('/').last;
           final fields = doc['fields'] as Map<String, dynamic>? ?? {};
-          final unwrapped = fields.map((k, v) => MapEntry(k, _unwrapField(v)));
+          final unwrapped = unwrapFields(fields);
 
           final kwh = (unwrapped['kwh'] as num?)?.toDouble() ?? 0.0;
           final peakKw = (unwrapped['peakKw'] as num?)?.toDouble() ?? 0.0;
@@ -114,7 +114,7 @@ class FirestoreService {
           final String name = doc['name'] ?? '';
           final dateStr = name.split('/').last;
           final fields = doc['fields'] as Map<String, dynamic>? ?? {};
-          final unwrapped = fields.map((k, v) => MapEntry(k, _unwrapField(v)));
+          final unwrapped = unwrapFields(fields);
 
           return {
             'date': dateStr,
@@ -189,6 +189,11 @@ class FirestoreService {
         if (idToken != null && idToken.isNotEmpty)
           'Authorization': 'Bearer $idToken',
       };
+
+  /// Unwraps a Firestore REST `fields` map into plain Dart values
+  /// (stringValue/int/double/bool/map/array). Public so tests can verify it.
+  static Map<String, dynamic> unwrapFields(Map<String, dynamic> fields) =>
+      fields.map((k, v) => MapEntry(k, _unwrapField(v)));
 
   static dynamic _unwrapField(dynamic field) {
     if (field is! Map<String, dynamic>) return null;

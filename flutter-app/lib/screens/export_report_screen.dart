@@ -65,9 +65,19 @@ class _ExportReportScreenState extends State<ExportReportScreen> {
         _climateHistory = climate;
         _signedIn = true;
         _loading = false;
+        // Default to whichever sensor actually has climate data recorded.
+        if (!_sensorHasData('sensor1') && _sensorHasData('sensor2')) {
+          _sensorKey = 'sensor2';
+        }
       });
     }
   }
+
+  bool _sensorHasData(String key) => _climateHistory.any((c) {
+        final sensors = (c['sensors'] as Map<String, dynamic>?) ?? const {};
+        final s = (sensors[key] as Map<String, dynamic>?) ?? const {};
+        return s['avgTemp'] is num;
+      });
 
   Map<String, dynamic>? _find(List<Map<String, dynamic>> list, String date) {
     for (final e in list) {
@@ -138,6 +148,20 @@ class _ExportReportScreenState extends State<ExportReportScreen> {
     final monthKwh = sumMonthlyKwh(_monthEnergy);
     final monthCost = sumMonthlyCostRsd(_monthEnergy);
 
+    final kwhValues = [
+      for (final r in rows)
+        if (r['kwh'] is num) (r['kwh'] as num).toDouble(),
+    ];
+    final tempValues = [
+      for (final r in rows)
+        if (r['temp'] is num) (r['temp'] as num).toDouble(),
+    ];
+    var maxKwh = kwhValues.isEmpty ? 1.0 : kwhValues.reduce((a, b) => a > b ? a : b);
+    if (maxKwh <= 0) maxKwh = 1.0;
+    var minTemp = tempValues.isEmpty ? 0.0 : tempValues.reduce((a, b) => a < b ? a : b);
+    var maxTemp = tempValues.isEmpty ? 1.0 : tempValues.reduce((a, b) => a > b ? a : b);
+    if (maxTemp - minTemp < 1) maxTemp = minTemp + 1;
+
     pw.Widget metric(String label, String value) => pw.Expanded(
           child: pw.Container(
             padding: const pw.EdgeInsets.all(12),
@@ -200,6 +224,83 @@ class _ExportReportScreenState extends State<ExportReportScreen> {
             ],
           ),
           pw.SizedBox(height: 24),
+
+          // Daily Power Consumption (kWh) bar chart
+          pw.Text('Daily Power Consumption (kWh)',
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.SizedBox(
+            height: 140,
+            width: double.infinity,
+            child: pw.Chart(
+              grid: pw.CartesianGrid(
+                xAxis: pw.FixedAxis<double>(
+                  List.generate(rows.length, (i) => i.toDouble()),
+                  format: (v) => (v >= 0 && v < rows.length)
+                      ? (rows[v.toInt()]['date'] as String).substring(8)
+                      : '',
+                  textStyle: pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
+                ),
+                yAxis: pw.FixedAxis<double>(
+                  [0, maxKwh / 2, maxKwh],
+                  format: (v) => v.toStringAsFixed(1),
+                  divisions: true,
+                  textStyle: pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
+                ),
+              ),
+              datasets: [
+                pw.BarDataSet(
+                  data: [
+                    for (var i = 0; i < rows.length; i++)
+                      if (rows[i]['kwh'] is num)
+                        pw.PointChartValue(i.toDouble(), (rows[i]['kwh'] as num).toDouble()),
+                  ],
+                  color: PdfColors.indigo,
+                  width: 6,
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 16),
+
+          // Daily Average Temperature (°C) line chart
+          pw.Text('Daily Average Temperature (°C)',
+              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.SizedBox(
+            height: 140,
+            width: double.infinity,
+            child: pw.Chart(
+              grid: pw.CartesianGrid(
+                xAxis: pw.FixedAxis<double>(
+                  List.generate(rows.length, (i) => i.toDouble()),
+                  format: (v) => (v >= 0 && v < rows.length)
+                      ? (rows[v.toInt()]['date'] as String).substring(8)
+                      : '',
+                  textStyle: pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
+                ),
+                yAxis: pw.FixedAxis<double>(
+                  [minTemp, (minTemp + maxTemp) / 2, maxTemp],
+                  format: (v) => v.toStringAsFixed(1),
+                  divisions: true,
+                  textStyle: pw.TextStyle(fontSize: 6, color: PdfColors.grey700),
+                ),
+              ),
+              datasets: [
+                pw.LineDataSet(
+                  data: [
+                    for (var i = 0; i < rows.length; i++)
+                      if (rows[i]['temp'] is num)
+                        pw.PointChartValue(i.toDouble(), (rows[i]['temp'] as num).toDouble()),
+                  ],
+                  color: PdfColors.blue,
+                  pointSize: 2,
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 24),
+
           pw.TableHelper.fromTextArray(
             headers: const [
               'Date',
