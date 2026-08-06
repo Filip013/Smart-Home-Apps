@@ -464,9 +464,15 @@ export default {
 
     const url = new URL(request.url);
 
-    if (env.AUTH_SECRET) {
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader !== `Bearer ${env.AUTH_SECRET}`) {
+    // Per-user auth (React & Flutter convention, see workerService.ts
+    // buildAuthHeader): the Authorization header carries the caller's Tuya
+    // clientSecret and must match the clientSecret query param — each user
+    // authenticates with their own credentials (multi-user friendly).
+    // AUTH_SECRET (if set) is used only for the TV box daemon fetch.
+    const clientSecretParam = url.searchParams.get('clientSecret') || '';
+    if (clientSecretParam) {
+      const authHeader = request.headers.get('Authorization') || '';
+      if (authHeader !== `Bearer ${clientSecretParam}`) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401,
           headers: corsHeaders()

@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsService {
   static const String _keyWorkerUrl = 'worker_url';
-  static const String _keyAuthToken = 'auth_token';
   static const String _keyDeviceId1 = 'device_id_1';
   static const String _keyDeviceName1 = 'device_name_1';
   static const String _keyDeviceLoc1 = 'device_loc_1';
@@ -22,7 +21,6 @@ class SettingsService {
   final SharedPreferences? _prefs;
 
   String _memWorkerUrl = 'https://smart-home-api.filip013.workers.dev';
-  String _memAuthToken = 'Twirly11';
   String _memDeviceId1 = 'bf8b4017359259c5b2jnfn';
   String _memDeviceName1 = 'Belgrade Sensor';
   String _memDeviceLoc1 = 'Belgrade';
@@ -51,7 +49,6 @@ class SettingsService {
   }
 
   String get workerUrl => _prefs?.getString(_keyWorkerUrl) ?? _memWorkerUrl;
-  String get authToken => _prefs?.getString(_keyAuthToken) ?? _memAuthToken;
   String get deviceId1 => _prefs?.getString(_keyDeviceId1) ?? _memDeviceId1;
   String get deviceName1 => _prefs?.getString(_keyDeviceName1) ?? _memDeviceName1;
   String get deviceLoc1 => _prefs?.getString(_keyDeviceLoc1) ?? _memDeviceLoc1;
@@ -69,7 +66,6 @@ class SettingsService {
 
   Future<void> saveSettings({
     required String workerUrl,
-    required String authToken,
     required String deviceId1,
     required String deviceName1,
     required String deviceLoc1,
@@ -86,7 +82,6 @@ class SettingsService {
     required String region,
   }) async {
     _memWorkerUrl = workerUrl.trim();
-    _memAuthToken = authToken.trim();
     _memDeviceId1 = deviceId1.trim();
     _memDeviceName1 = deviceName1.trim();
     _memDeviceLoc1 = deviceLoc1.trim();
@@ -106,7 +101,6 @@ class SettingsService {
     if (prefs != null) {
       try {
         await prefs.setString(_keyWorkerUrl, _memWorkerUrl);
-        await prefs.setString(_keyAuthToken, _memAuthToken);
         await prefs.setString(_keyDeviceId1, _memDeviceId1);
         await prefs.setString(_keyDeviceName1, _memDeviceName1);
         await prefs.setString(_keyDeviceLoc1, _memDeviceLoc1);

@@ -14,10 +14,11 @@ class ApiService {
   String get baseUrl =>
       settingsService?.workerUrl ?? 'https://smart-home-api.filip013.workers.dev';
 
-  String get authToken => settingsService?.authToken ?? 'Twirly11';
-
-  Map<String, String> get _headers => {
-        'Authorization': 'Bearer $authToken',
+  /// React convention (workerService.ts buildAuthHeader): the user's Tuya
+  /// clientSecret doubles as the worker bearer token — per-user auth, so the
+  /// worker gate accepts each user's own credentials (multi-user friendly).
+  Map<String, String> _headersFor(Map<String, String> params) => {
+        'Authorization': 'Bearer ${params['clientSecret'] ?? ''}',
         'Content-Type': 'application/json',
       };
 
@@ -130,7 +131,7 @@ class ApiService {
     final uri = Uri.parse('$workerUrl/api/status').replace(queryParameters: resolved.params);
 
     try {
-      final response = await http.get(uri, headers: _headers);
+      final response = await http.get(uri, headers: _headersFor(resolved.params));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
@@ -161,7 +162,7 @@ class ApiService {
     try {
       final response = await http.post(
         uri,
-        headers: _headers,
+        headers: _headersFor(resolved.params),
         body: json.encode(payload),
       );
 

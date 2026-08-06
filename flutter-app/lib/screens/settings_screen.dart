@@ -17,7 +17,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _workerUrlController;
-  late TextEditingController _authTokenController;
   late TextEditingController _deviceId1Controller;
   late TextEditingController _deviceName1Controller;
   late TextEditingController _deviceLoc1Controller;
@@ -37,7 +36,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _workerUrlController = TextEditingController(text: widget.settingsService.workerUrl);
-    _authTokenController = TextEditingController(text: widget.settingsService.authToken);
     _deviceId1Controller = TextEditingController(text: widget.settingsService.deviceId1);
     _deviceName1Controller = TextEditingController(text: widget.settingsService.deviceName1);
     _deviceLoc1Controller = TextEditingController(text: widget.settingsService.deviceLoc1);
@@ -57,7 +55,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _workerUrlController.dispose();
-    _authTokenController.dispose();
     _deviceId1Controller.dispose();
     _deviceName1Controller.dispose();
     _deviceLoc1Controller.dispose();
@@ -78,7 +75,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _save() async {
     await widget.settingsService.saveSettings(
       workerUrl: _workerUrlController.text,
-      authToken: _authTokenController.text,
       deviceId1: _deviceId1Controller.text,
       deviceName1: _deviceName1Controller.text,
       deviceLoc1: _deviceLoc1Controller.text,
@@ -170,13 +166,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               isDark: isDark,
             ),
             const SizedBox(height: 16),
-            _buildTextField(
-              controller: _authTokenController,
-              label: 'Authorization Bearer Token (AUTH_SECRET)',
-              icon: LucideIcons.key,
-              obscureText: true,
-              isDark: isDark,
-            ),
             const SizedBox(height: 24),
 
             _buildSectionHeader('Tuya Cloud Credentials (Tuya IoT Platform)'),
