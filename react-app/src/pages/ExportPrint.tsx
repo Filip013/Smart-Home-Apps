@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchAllDeviceData, fetchRealDailyClimateStats } from '../utils/deviceBridge';
+import { fetchDailyHistoryAsync } from '../utils/workerService';
+import { getWorkerModeEnabled } from '../utils/tuyaService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -51,6 +53,29 @@ export const ExportPrint: React.FC = () => {
       setPowerData(data.power);
       setSensors(data.sensors);
       setMode(data.mode);
+      setLoading(false);
+
+      // Worker mode: dailyHistory starts empty from the worker response.
+      // Fetch Firestore history in parallel and backfill once ready —
+      // same pattern as Dashboard so the export tab shows full history.
+      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
+        try {
+          const history = await fetchDailyHistoryAsync(
+            data.powerDeviceId,
+            data.energyCode || 'add_ele',
+          );
+          setPowerData(prev => prev ? {
+            ...prev,
+            dailyHistory:   history.dailyHistory,
+            weekKwh:        history.weekKwh,
+            monthKwh:       history.monthKwh,
+            estMonthlyCost: history.estMonthlyCost,
+            breakdown:      history.breakdown,
+          } : null);
+        } catch (e) {
+          console.warn('ExportPrint: Firestore daily history fetch failed (non-fatal):', e);
+        }
+      }
 
       if (data.mode === 'live') {
         const history = await fetchRealDailyClimateStats();
@@ -78,7 +103,6 @@ export const ExportPrint: React.FC = () => {
         }
         setClimateHistory(mockHistory);
       }
-      setLoading(false);
     };
     loadData();
   }, []);

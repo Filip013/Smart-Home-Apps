@@ -1,15 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged, auth, signInWithGoogle, getRedirectResult } from './utils/tuyaService';
 import type { User } from 'firebase/auth';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
-import { PowerDetails } from './pages/PowerDetails';
-import { ExportPrint } from './pages/ExportPrint';
-import { Settings } from './pages/Settings';
-import { DesktopAuth } from './pages/DesktopAuth';
 import { Zap } from 'lucide-react';
-import './index.css'; 
+import './index.css';
+
+// F: Lazy-load heavy pages — they're not needed on the initial render, so
+// splitting them out cuts the JS parse/evaluate time on every cold start.
+const PowerDetails = lazy(() => import('./pages/PowerDetails').then(m => ({ default: m.PowerDetails })));
+const ExportPrint  = lazy(() => import('./pages/ExportPrint').then(m => ({ default: m.ExportPrint })));
+const Settings     = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
+const DesktopAuth  = lazy(() => import('./pages/DesktopAuth').then(m => ({ default: m.DesktopAuth })));
+
+// Minimal fallback shown while a lazy chunk is streaming in
+const PageFallback = () => (
+  <div className="loading-screen" style={{ height: '80vh' }}>
+    <Zap className="animate-spin text-primary" size={36} />
+  </div>
+);
 
 function MainApp({ user, authError, handleLogin }: { user: User | null; authError: string; handleLogin: () => void }) {
   if (!user) {
@@ -120,20 +130,25 @@ function MainApp({ user, authError, handleLogin }: { user: User | null; authErro
 
   return (
     <Layout>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/power" element={<PowerDetails />} />
-        <Route path="/export" element={<ExportPrint />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/power" element={<PowerDetails />} />
+          <Route path="/export" element={<ExportPrint />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </Layout>
   );
 }
 
 function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  // A: Seed from the synchronous cache so we skip the spinner on restarts.
+  // auth.currentUser is non-null immediately after the SDK hydrates from
+  // IndexedDB, which happens before React's first render on warm starts.
+  const [user, setUser] = useState<User | null>(auth.currentUser);
+  const [loading, setLoading] = useState(!auth.currentUser); // skip spinner if cached
   const [authError, setAuthError] = useState('');
 
   useEffect(() => {
@@ -175,10 +190,12 @@ function App() {
 
   return (
     <Router>
-      <Routes>
-        <Route path="/desktop-auth" element={<DesktopAuth />} />
-        <Route path="*" element={<MainApp user={user} authError={authError} handleLogin={handleLogin} />} />
-      </Routes>
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/desktop-auth" element={<DesktopAuth />} />
+          <Route path="*" element={<MainApp user={user} authError={authError} handleLogin={handleLogin} />} />
+        </Routes>
+      </Suspense>
     </Router>
   );
 }

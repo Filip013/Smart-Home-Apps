@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
 import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
-import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
+import { fetchInstantPowerFromWorkerProxy, fetchDailyHistoryAsync } from '../utils/workerService';
 import type { TempSensor, PowerMeter } from '../utils/mockData';
 import { LineAreaChart } from '../components/CustomChart';
 import { 
@@ -43,7 +43,7 @@ export const Dashboard: React.FC = () => {
   // Tracks whether dashboard data was loaded from the Cloudflare Worker or local Tuya calls
   const [dataSource, setDataSource] = useState<'local' | 'worker'>(getWorkerModeEnabled() ? 'worker' : 'local');
 
-  // Initialize data
+  // Initialize data — B+C: fetch worker data first (fast), then Firestore in parallel
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -51,9 +51,30 @@ export const Dashboard: React.FC = () => {
       setSensors(data.sensors);
       setPowerData(data.power);
       setMode(data.mode);
-      // Record whether data came from the worker or local Tuya calls
       setDataSource(getWorkerModeEnabled() ? 'worker' : 'local');
       setLoading(false);
+
+      // C: If in worker mode, kick off the Firestore daily history fetch in the
+      // background. The power card is already visible at this point, so this
+      // update arrives silently without blocking the initial render.
+      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
+        try {
+          const history = await fetchDailyHistoryAsync(
+            data.powerDeviceId,
+            data.energyCode || 'add_ele',
+          );
+          setPowerData(prev => prev ? {
+            ...prev,
+            dailyHistory:    history.dailyHistory,
+            weekKwh:         history.weekKwh,
+            monthKwh:        history.monthKwh,
+            estMonthlyCost:  history.estMonthlyCost,
+            breakdown:       history.breakdown,
+          } : null);
+        } catch (e) {
+          console.warn('Firestore daily history fetch failed (non-fatal):', e);
+        }
+      }
     };
     loadData();
   }, []);
@@ -296,11 +317,33 @@ export const Dashboard: React.FC = () => {
     };
   }, [powerData === null, mode]);
 
+  // B: Instead of a full-screen loading gate, show skeleton cards so the
+  // layout is immediately visible and the spinner only appears per-card.
+  const SkeletonCard = ({ style }: { style?: React.CSSProperties }) => (
+    <div
+      className="dashboard-card glass"
+      style={{
+        background: 'linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'skeleton-shimmer 1.6s infinite',
+        minHeight: 200,
+        borderRadius: 'var(--radius-lg)',
+        ...style,
+      }}
+    />
+  );
+
   if (loading) {
     return (
-      <div className="loading-screen" style={{ height: '80vh' }}>
-        <Zap className="animate-spin text-primary" size={48} />
-        <p style={{ marginTop: '12px' }}>Connecting to smart devices...</p>
+      <div className="dashboard-view animate-fade-in">
+        <section className="overview-hero glass" style={{ minHeight: 100, animation: 'skeleton-shimmer 1.6s infinite', backgroundSize: '200% 100%', background: 'linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%)' }} />
+        <div className="dashboard-grid" style={{ marginTop: 24 }}>
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+        <div className="dashboard-secondary-grid" style={{ marginTop: 24 }}>
+          <SkeletonCard style={{ minHeight: 120 }} />
+        </div>
       </div>
     );
   }

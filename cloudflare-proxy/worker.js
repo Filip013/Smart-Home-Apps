@@ -259,14 +259,15 @@ const scaleEnergyKwh = (val) => {
   return Number((num / 1000).toFixed(2));
 };
 
-// Helper to paginate up to 10 pages of Tuya report logs
+// Helper to paginate up to 3 pages of Tuya report logs
+// E: 3 pages (300 entries) covers 24h for any sensor without the 10-page worst-case
 async function fetchAllReportLogs(env, deviceId, codes, startTime, endTime, creds) {
   let allLogs = [];
   let lastRowKey = '';
   let hasMore = true;
   let pageCount = 0;
 
-  while (hasMore && pageCount < 10) {
+  while (hasMore && pageCount < 3) {
     // FIX #2: Restored to size=100 and removed conflicting start_row_key
     const rowKeyParam = lastRowKey ? `&last_row_key=${encodeURIComponent(lastRowKey)}` : '';
     const res = await makeTuyaRequest(
@@ -456,6 +457,150 @@ async function getConfig(env, url) {
   };
 }
 
+// D: Extracted status-response builder — called both inline and via ctx.waitUntil()
+// for the KV stale-while-revalidate background revalidation.
+async function buildStatusResponse(env, config, creds, startTime, endTime, ctx, kvCacheKey) {
+  const endTimeInner = Date.now();
+  const startTimeInner = endTimeInner - 24 * 60 * 60 * 1000;
+
+  const historyKey = [
+    config.tempDeviceId1, config.tempDeviceId2, config.powerDeviceId,
+    config.tempCode1, config.tempCode2, config.powerCode, config.energyCode,
+    config.timezone
+  ].join('|');
+  const cacheFresh = historyCache && historyCache.key === historyKey &&
+    (Date.now() - historyCache.ts) < HISTORY_CACHE_TTL_MS;
+
+  let sensor1Err = null, sensor2Err = null, powerErr = null;
+
+  const [sensor1, sensor2, powerMeter, tvBoxData] = await Promise.all([
+    (async () => {
+      if (!config.tempDeviceId1) return null;
+      try {
+        const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId1}/status`, 'GET', null, creds);
+        const status = statusRes.result || [];
+        const tempVal = status.find(s => s.code === config.tempCode1 || s.code === 'temp_current')?.value;
+        const humVal = status.find(s => s.code === config.humCode1 || s.code === 'humidity_value')?.value;
+        const batVal = status.find(s => s.code === 'battery_percentage' || s.code === 'battery')?.value;
+        const currentTemp = tempVal !== undefined ? scaleTemp(tempVal) : 0;
+        const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
+        const battery = batVal !== undefined ? Number(batVal) : 0;
+        let history;
+        if (cacheFresh && historyCache.sensor1) {
+          history = historyCache.sensor1;
+        } else {
+          const logs = await fetchAllReportLogs(env, config.tempDeviceId1, `${config.tempCode1},${config.humCode1}`, startTimeInner, endTimeInner, creds);
+          history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode1, config.humCode1, config.timezone);
+        }
+        return { id: config.tempDeviceId1, name: config.tempName1 || 'Living Room Sensor', location: config.tempLoc1 || 'Main Floor', currentTemp, currentHumidity, status: 'online', battery, history };
+      } catch (err) { sensor1Err = err.message || String(err); console.error('Error fetching sensor 1:', err); return null; }
+    })(),
+    (async () => {
+      if (!config.tempDeviceId2) return null;
+      try {
+        const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId2}/status`, 'GET', null, creds);
+        const status = statusRes.result || [];
+        const tempVal = status.find(s => s.code === config.tempCode2 || s.code === 'temp_current')?.value;
+        const humVal = status.find(s => s.code === config.humCode2 || s.code === 'humidity_value')?.value;
+        const batVal = status.find(s => s.code === 'battery_percentage' || s.code === 'battery')?.value;
+        const currentTemp = tempVal !== undefined ? scaleTemp(tempVal) : 0;
+        const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
+        const battery = batVal !== undefined ? Number(batVal) : 0;
+        let history;
+        if (cacheFresh && historyCache.sensor2) {
+          history = historyCache.sensor2;
+        } else {
+          const logs = await fetchAllReportLogs(env, config.tempDeviceId2, `${config.tempCode2},${config.humCode2}`, startTimeInner, endTimeInner, creds);
+          history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode2, config.humCode2, config.timezone);
+        }
+        return { id: config.tempDeviceId2, name: config.tempName2 || 'Greenhouse Sensor', location: config.tempLoc2 || 'Backyard Garden', currentTemp, currentHumidity, status: 'online', battery, history };
+      } catch (err) { sensor2Err = err.message || String(err); console.error('Error fetching sensor 2:', err); return null; }
+    })(),
+    (async () => {
+      if (!config.powerDeviceId) return null;
+      try {
+        const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.powerDeviceId}/status`, 'GET', null, creds);
+        const status = statusRes.result || [];
+        const pVal = status.find(s => s.code === config.powerCode || s.code === 'cur_power')?.value;
+        const vVal = status.find(s => s.code === config.voltCode || s.code === 'cur_voltage')?.value;
+        const iVal = status.find(s => s.code === config.currCode || s.code === 'cur_current')?.value;
+        const eVal = status.find(s => s.code === config.energyCode || s.code === 'add_ele')?.value;
+        const currentLoad = pVal !== undefined ? Number(scalePower(pVal).toFixed(1)) : 0;
+        const voltage = vVal !== undefined ? Number(scaleVoltage(vVal).toFixed(1)) : 0;
+        const currentAmps = iVal !== undefined ? Number(scaleCurrent(iVal).toFixed(2)) : (currentLoad > 0 ? Number((currentLoad / 230).toFixed(2)) : 0);
+        let hourlyHistory, todayKwh = 0;
+        let energyDebug = { path: 'none', energyLogsCount: 0, sumRaw: 0, midnight: 0, eVal };
+        if (cacheFresh && historyCache.power) {
+          hourlyHistory = historyCache.power.hourlyHistory;
+          todayKwh = historyCache.power.todayKwh;
+          energyDebug = historyCache.power.energyDebug;
+        } else {
+          const logs = await fetchAllReportLogs(env, config.powerDeviceId, config.powerCode, startTimeInner, endTimeInner, creds);
+          let energyLogs24h = [];
+          try { energyLogs24h = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, startTimeInner, endTimeInner, creds); } catch (e) { console.error('Error fetching 24h energy logs:', e); }
+          hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone, energyLogs24h);
+          try {
+            const midnight = getLocalMidnightTime(config.timezone);
+            energyDebug.midnight = midnight;
+            const energyLogs = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, midnight, endTimeInner, creds);
+            energyDebug.energyLogsCount = energyLogs.length;
+            if (energyLogs.length > 0) {
+              const sumRaw = energyLogs.reduce((acc, l) => acc + (Number(l.value) || 0), 0);
+              energyDebug.sumRaw = sumRaw;
+              todayKwh = Number((sumRaw / 1000).toFixed(2));
+              energyDebug.path = 'logs_sum_div_1000';
+            }
+          } catch (eErr) { energyDebug.path = 'error: ' + (eErr.message || String(eErr)); }
+          if (todayKwh === 0 && eVal !== undefined) { todayKwh = scaleEnergyKwh(eVal); energyDebug.path = 'fallback_scaleEnergyKwh'; }
+        }
+        return { id: config.powerDeviceId, name: config.powerName || 'Main Grid Meter', currentLoad, voltage, currentAmps, todayKwh, energyDebug, hourlyHistory, dailyHistory: [] };
+      } catch (err) { powerErr = err.message || String(err); console.error('Error fetching power meter:', err); return null; }
+    })(),
+    (async () => {
+      const tvBoxUrl = env.TV_BOX_POWER_URL || config.tvBoxUrl;
+      if (!tvBoxUrl) return null;
+      try {
+        const tvBoxHeaders = { 'Accept': 'application/json', 'User-Agent': 'SmartHomeWorker/1.0' };
+        const secretToken = env.TUYA_CLIENT_SECRET || env.AUTH_SECRET;
+        if (secretToken) tvBoxHeaders['Authorization'] = secretToken.startsWith('Bearer ') ? secretToken : `Bearer ${secretToken}`;
+        const tvBoxRes = await fetch(tvBoxUrl, { method: 'GET', headers: tvBoxHeaders });
+        if (tvBoxRes.ok) { const text = await tvBoxRes.text(); try { return JSON.parse(text); } catch { return { raw: text }; } }
+        return { error: `HTTP ${tvBoxRes.status} ${tvBoxRes.statusText}` };
+      } catch (tvErr) { return { error: `TV Box unreachable: ${tvErr.message}` }; }
+    })()
+  ]);
+
+  if (!cacheFresh) {
+    const prev = historyCache;
+    historyCache = {
+      key: historyKey, ts: Date.now(),
+      sensor1: sensor1 && sensor1.history && sensor1.history.length > 0 ? sensor1.history : (prev ? prev.sensor1 : null),
+      sensor2: sensor2 && sensor2.history && sensor2.history.length > 0 ? sensor2.history : (prev ? prev.sensor2 : null),
+      power: powerMeter && powerMeter.hourlyHistory && powerMeter.hourlyHistory.length > 0
+        ? { hourlyHistory: powerMeter.hourlyHistory, todayKwh: powerMeter.todayKwh, energyDebug: powerMeter.energyDebug }
+        : (prev ? prev.power : null)
+    };
+  }
+
+  const payload = {
+    success: true,
+    timestamp: Math.floor(Date.now() / 1000),
+    sensors: [sensor1, sensor2].filter(Boolean),
+    power: powerMeter,
+    tvBox: tvBoxData,
+    debug: { workerVersion: '2026-08-06-v4-perf', hasKv: Boolean(env.SMART_HOME_CONFIG), config, sensor1Err, sensor2Err, powerErr }
+  };
+
+  // D: Store fresh result in KV so cold worker instances skip the Tuya round-trips.
+  if (env.SMART_HOME_CONFIG && kvCacheKey) {
+    try {
+      await env.SMART_HOME_CONFIG.put(kvCacheKey, JSON.stringify(payload), { expirationTtl: 300 });
+    } catch (_) { /* non-fatal */ }
+  }
+
+  return payload;
+}
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === 'OPTIONS') {
@@ -502,241 +647,27 @@ export default {
         const endTime = Date.now();
         const startTime = endTime - 24 * 60 * 60 * 1000;
 
-        // Rate-limit guard: reuse cached 24h histories when fresh.
-        const historyKey = [
-          config.tempDeviceId1, config.tempDeviceId2, config.powerDeviceId,
-          config.tempCode1, config.tempCode2, config.powerCode, config.energyCode,
-          config.timezone
-        ].join('|');
-        const cacheFresh = historyCache && historyCache.key === historyKey &&
-          (Date.now() - historyCache.ts) < HISTORY_CACHE_TTL_MS;
+        // D: KV stale-while-revalidate — serve the last good payload instantly on cold
+        // worker instances (where in-memory historyCache is empty), then rebuild in the
+        // background so the next caller gets fresh data.
+        const kvCacheKey = `cache_status_${[
+          config.tempDeviceId1, config.tempDeviceId2, config.powerDeviceId
+        ].join('|')}`.substring(0, 512);
 
-        let sensor1Err = null;
-        let sensor2Err = null;
-        let powerErr = null;
-
-        // FIX #4: Fetch all devices simultaneously instead of waiting sequentially to avoid Cloudflare timeouts
-        const [sensor1, sensor2, powerMeter, tvBoxData] = await Promise.all([
-          // 1. Fetch Sensor 1
-          (async () => {
-            if (!config.tempDeviceId1) return null;
-            try {
-              const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId1}/status`, 'GET', null, creds);
-              const status = statusRes.result || [];
-              
-              const tempVal = status.find(s => s.code === config.tempCode1 || s.code === 'temp_current')?.value;
-              const humVal = status.find(s => s.code === config.humCode1 || s.code === 'humidity_value')?.value;
-              const batVal = status.find(s => s.code === 'battery_percentage' || s.code === 'battery')?.value;
-
-              const currentTemp = tempVal !== undefined ? scaleTemp(tempVal) : 0;
-              const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
-              const battery = batVal !== undefined ? Number(batVal) : 0;
-
-              let history;
-              if (cacheFresh && historyCache.sensor1) {
-                history = historyCache.sensor1;
-              } else {
-                const logs = await fetchAllReportLogs(env, config.tempDeviceId1, `${config.tempCode1},${config.humCode1}`, startTime, endTime, creds);
-                history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode1, config.humCode1, config.timezone);
-              }
-
-              return {
-                id: config.tempDeviceId1,
-                name: config.tempName1 || 'Living Room Sensor',
-                location: config.tempLoc1 || 'Main Floor',
-                currentTemp,
-                currentHumidity,
-                status: 'online',
-                battery,
-                history
-              };
-            } catch (err) {
-              sensor1Err = err.message || String(err);
-              console.error('Error fetching sensor 1:', err);
-              return null;
+        if (env.SMART_HOME_CONFIG) {
+          try {
+            const kvHit = await env.SMART_HOME_CONFIG.get(kvCacheKey, 'json');
+            if (kvHit) {
+              // Return stale payload instantly; refresh in the background.
+              ctx.waitUntil(buildStatusResponse(env, config, creds, startTime, endTime, ctx, kvCacheKey));
+              return new Response(JSON.stringify(kvHit), { headers: corsHeaders() });
             }
-          })(),
-
-          // 2. Fetch Sensor 2
-          (async () => {
-            if (!config.tempDeviceId2) return null;
-            try {
-              const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.tempDeviceId2}/status`, 'GET', null, creds);
-              const status = statusRes.result || [];
-              
-              const tempVal = status.find(s => s.code === config.tempCode2 || s.code === 'temp_current')?.value;
-              const humVal = status.find(s => s.code === config.humCode2 || s.code === 'humidity_value')?.value;
-              const batVal = status.find(s => s.code === 'battery_percentage' || s.code === 'battery')?.value;
-
-              const currentTemp = tempVal !== undefined ? scaleTemp(tempVal) : 0;
-              const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
-              const battery = batVal !== undefined ? Number(batVal) : 0;
-
-              let history;
-              if (cacheFresh && historyCache.sensor2) {
-                history = historyCache.sensor2;
-              } else {
-                const logs = await fetchAllReportLogs(env, config.tempDeviceId2, `${config.tempCode2},${config.humCode2}`, startTime, endTime, creds);
-                history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode2, config.humCode2, config.timezone);
-              }
-
-              return {
-                id: config.tempDeviceId2,
-                name: config.tempName2 || 'Greenhouse Sensor',
-                location: config.tempLoc2 || 'Backyard Garden',
-                currentTemp,
-                currentHumidity,
-                status: 'online',
-                battery,
-                history
-              };
-            } catch (err) {
-              sensor2Err = err.message || String(err);
-              console.error('Error fetching sensor 2:', err);
-              return null;
-            }
-          })(),
-
-          // 3. Fetch Power Meter
-          (async () => {
-            if (!config.powerDeviceId) return null;
-            try {
-              const statusRes = await makeTuyaRequest(env, `/v1.0/devices/${config.powerDeviceId}/status`, 'GET', null, creds);
-              const status = statusRes.result || [];
-
-              const pVal = status.find(s => s.code === config.powerCode || s.code === 'cur_power')?.value;
-              const vVal = status.find(s => s.code === config.voltCode || s.code === 'cur_voltage')?.value;
-              const iVal = status.find(s => s.code === config.currCode || s.code === 'cur_current')?.value;
-              const eVal = status.find(s => s.code === config.energyCode || s.code === 'add_ele')?.value;
-
-              const currentLoad = pVal !== undefined ? Number(scalePower(pVal).toFixed(1)) : 0;
-              const voltage = vVal !== undefined ? Number(scaleVoltage(vVal).toFixed(1)) : 0;
-              const currentAmps = iVal !== undefined ? Number(scaleCurrent(iVal).toFixed(2)) : (currentLoad > 0 ? Number((currentLoad / 230).toFixed(2)) : 0);
-
-              let hourlyHistory;
-              let todayKwh = 0;
-              let energyDebug = { path: 'none', energyLogsCount: 0, sumRaw: 0, midnight: 0, eVal: eVal };
-
-              if (cacheFresh && historyCache.power) {
-                hourlyHistory = historyCache.power.hourlyHistory;
-                todayKwh = historyCache.power.todayKwh;
-                energyDebug = historyCache.power.energyDebug;
-              } else {
-                const logs = await fetchAllReportLogs(env, config.powerDeviceId, config.powerCode, startTime, endTime, creds);
-                // Fetch add_ele over the full 24h window too, so hours without cur_power
-                // reports (e.g. consumer off / steady draw) can be filled from energy deltas.
-                let energyLogs24h = [];
-                try {
-                  energyLogs24h = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, startTime, endTime, creds);
-                } catch (energyErr) {
-                  console.error('Error fetching 24h energy logs:', energyErr);
-                }
-                hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone, energyLogs24h);
-
-                try {
-                  const midnight = getLocalMidnightTime(config.timezone);
-                  energyDebug.midnight = midnight;
-
-                  const energyLogs = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, midnight, endTime, creds);
-                  energyDebug.energyLogsCount = energyLogs.length;
-
-                  if (energyLogs.length > 0) {
-                    const sumRaw = energyLogs.reduce((acc, l) => acc + (Number(l.value) || 0), 0);
-                    energyDebug.sumRaw = sumRaw;
-                    todayKwh = Number((sumRaw / 1000).toFixed(2));
-                    energyDebug.path = 'logs_sum_div_1000';
-                  }
-                } catch (eErr) {
-                  energyDebug.path = 'error: ' + (eErr.message || String(eErr));
-                }
-
-                if (todayKwh === 0 && eVal !== undefined) {
-                  todayKwh = scaleEnergyKwh(eVal);
-                  energyDebug.path = 'fallback_scaleEnergyKwh';
-                }
-              }
-
-              return {
-                id: config.powerDeviceId,
-                name: config.powerName || 'Main Grid Meter',
-                currentLoad,
-                voltage,
-                currentAmps,
-                todayKwh,
-                energyDebug,
-                hourlyHistory,
-                dailyHistory: []
-              };
-            } catch (err) {
-              powerErr = err.message || String(err);
-              console.error('Error fetching power meter:', err);
-              return null;
-            }
-          })(),
-
-          // 4. Fetch TV Box Daemon
-          (async () => {
-            const tvBoxUrl = env.TV_BOX_POWER_URL || config.tvBoxUrl || url.searchParams.get('localTvBoxIp');
-            if (!tvBoxUrl) return null;
-            
-            try {
-              const tvBoxHeaders = { 'Accept': 'application/json', 'User-Agent': 'SmartHomeWorker/1.0' };
-              const secretToken = env.TUYA_CLIENT_SECRET || env.AUTH_SECRET || url.searchParams.get('clientSecret');
-              const reqAuth = request.headers.get('Authorization');
-
-              if (secretToken) tvBoxHeaders['Authorization'] = secretToken.startsWith('Bearer ') ? secretToken : `Bearer ${secretToken}`;
-              else if (reqAuth) tvBoxHeaders['Authorization'] = reqAuth;
-
-              const tvBoxRes = await fetch(tvBoxUrl, { method: 'GET', headers: tvBoxHeaders });
-              if (tvBoxRes.ok) {
-                const text = await tvBoxRes.text();
-                try { return JSON.parse(text); } catch { return { raw: text }; }
-              }
-              return { error: `HTTP ${tvBoxRes.status} ${tvBoxRes.statusText}` };
-            } catch (tvErr) {
-              return { error: `TV Box unreachable: ${tvErr.message}` };
-            }
-          })()
-        ]);
-
-        // Store fresh histories for the next polls. Keep the previous good
-        // values when a refresh returns nothing (rate-limited) so the API
-        // never collapses to zeros.
-        if (!cacheFresh) {
-          const prev = historyCache;
-          historyCache = {
-            key: historyKey,
-            ts: Date.now(),
-            sensor1: sensor1 && sensor1.history && sensor1.history.length > 0
-              ? sensor1.history
-              : (prev ? prev.sensor1 : null),
-            sensor2: sensor2 && sensor2.history && sensor2.history.length > 0
-              ? sensor2.history
-              : (prev ? prev.sensor2 : null),
-            power: powerMeter && powerMeter.hourlyHistory && powerMeter.hourlyHistory.length > 0
-              ? { hourlyHistory: powerMeter.hourlyHistory, todayKwh: powerMeter.todayKwh, energyDebug: powerMeter.energyDebug }
-              : (prev ? prev.power : null)
-          };
+          } catch (_) { /* KV miss — fall through to live fetch */ }
         }
 
-        const sensors = [sensor1, sensor2].filter(Boolean);
-
-        return new Response(JSON.stringify({
-          success: true,
-          timestamp: Math.floor(Date.now() / 1000),
-          sensors,
-          power: powerMeter,
-          tvBox: tvBoxData,
-          debug: {
-            workerVersion: '2026-08-03-v3-fixed',
-            hasKv: Boolean(env.SMART_HOME_CONFIG),
-            uid: url.searchParams.get('uid'),
-            config,
-            sensor1Err,
-            sensor2Err,
-            powerErr
-          }
-        }), { headers: corsHeaders() });
+        // No KV cache — build live and also persist to KV.
+        const payload = await buildStatusResponse(env, config, creds, startTime, endTime, ctx, kvCacheKey);
+        return new Response(JSON.stringify(payload), { headers: corsHeaders() });
       }
 
       // ROUTE 2: GET /api/wear-summary

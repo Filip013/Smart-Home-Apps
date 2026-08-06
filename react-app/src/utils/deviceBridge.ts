@@ -1,6 +1,6 @@
 import { getDeviceStatus, getTuyaConfig, makeTuyaRequest, auth, fetchFirestoreDailyPowerStats, fetchFirestoreDailyClimateStats, fetchFirestoreDayPowerStats, fetchFirestoreDayClimateStats, getWorkerModeEnabled } from './tuyaService';
 import { fetchAllDeviceDataFromWorker } from './workerService';
-import type { TempSensor, PowerMeter } from './mockData';
+import type { TempSensor, PowerMeter, DailyPowerReading } from './mockData';
 
 
 // Check if credentials are fully configured
@@ -374,13 +374,12 @@ export const fetchRealPowerHistory = async (
 
 // Fetch daily energy statistics from Firestore (populated by GitHub Actions)
 export const fetchRealDailyPowerStats = async (
-  _deviceId: string,
-  _energyCode: string
-): Promise<{ date: string; kwh: number; peakKw: number; cost: number; hourly?: number[] }[]> => {
+  _powerDeviceId?: string,
+  _energyCode?: string
+): Promise<DailyPowerReading[]> => {
   try {
     const user = auth.currentUser;
-    if (!user) return [];
-    return await fetchFirestoreDailyPowerStats(user.uid);
+    return await fetchFirestoreDailyPowerStats(user?.uid);
   } catch (error) {
     console.error("Error loading daily stats from Firestore:", error);
     return [];
@@ -391,8 +390,7 @@ export const fetchRealDailyPowerStats = async (
 export const fetchRealDailyClimateStats = async (): Promise<{ date: string; sensors: any }[]> => {
   try {
     const user = auth.currentUser;
-    if (!user) return [];
-    return await fetchFirestoreDailyClimateStats(user.uid);
+    return await fetchFirestoreDailyClimateStats(user?.uid);
   } catch (error) {
     console.error("Error loading daily climate stats from Firestore:", error);
     return [];
@@ -576,6 +574,8 @@ export const fetchAllDeviceData = async (): Promise<{
   mode: 'live' | 'demo';
   sensors: TempSensor[];
   power: PowerMeter | null;
+  powerDeviceId?: string | null;   // forwarded from worker for parallel Firestore fetch
+  energyCode?: string;
 }> => {
   // Worker mode: delegate to the Cloudflare Worker BFF for a single aggregated fetch.
   // Called only on initial load or manual refresh — never polled.

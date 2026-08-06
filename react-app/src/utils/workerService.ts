@@ -15,7 +15,7 @@
 
 import { getCachedTuyaConfig } from './tuyaService';
 import { fetchRealDailyPowerStats } from './deviceBridge';
-import type { TempSensor, PowerMeter } from './mockData';
+import type { TempSensor, PowerMeter, DailyPowerReading } from './mockData';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -36,12 +36,10 @@ function buildAuthHeader(secret: string | undefined): string | undefined {
 // ─── /api/status ─────────────────────────────────────────────────────────────
 
 /**
- * Calls the worker's GET /api/status endpoint with all device config params
- * forwarded as query parameters, then maps the response to the local type shapes.
- *
- * Sourced data responsibilities:
- *  - Worker: 24h real-time sensor/power status and hourly history
- *  - Firestore: Daily energy history, week/month kWh totals, and billing stats (same as local API)
+ * Phase 1: Calls the worker's GET /api/status and returns sensor + power data
+ * immediately — WITHOUT waiting for Firestore. The power object will have an
+ * empty dailyHistory array; call fetchDailyHistoryAsync() in parallel to fill
+ * it in as a follow-up state update.
  *
  * Called ONCE on initial page load or manual refresh — never polled.
  */
@@ -49,6 +47,8 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
   mode: 'live' | 'demo';
   sensors: TempSensor[];
   power: PowerMeter | null;
+  powerDeviceId: string | null;  // forwarded so the Dashboard can call Phase 2
+  energyCode: string;
 }> => {
   const config = getCachedTuyaConfig();
   if (!config) throw new Error('Tuya config not found in localStorage.');
@@ -114,19 +114,18 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
     })) : [],
   }));
 
-  // Map worker power object → PowerMeter | null
+  // C: Map worker power → PowerMeter WITHOUT awaiting Firestore.
+  // dailyHistory starts empty; the Dashboard fills it via fetchDailyHistoryAsync().
   let power: PowerMeter | null = null;
+  const powerDeviceId = data.power?.id || config.powerDeviceId || null;
+  const energyCode = config.energyCode || 'add_ele';
+
   if (data.power) {
     const p = data.power;
-    const powerDeviceId = p.id || config.powerDeviceId || 'power-meter';
-    const energyCode = config.energyCode || 'add_ele';
     const todayKwh = Number(p.todayKwh) || 0;
-
-    // Sourced directly from Firestore (same as local API in deviceBridge.ts)
-    const dailyHistory = await fetchRealDailyPowerStats(powerDeviceId, energyCode);
-
-    const weekKwh = Number(dailyHistory.slice(-7).reduce((acc, d) => acc + d.kwh, 0).toFixed(1));
-    const monthKwh = Number(dailyHistory.reduce((acc, d) => acc + d.kwh, 0).toFixed(1)) || todayKwh;
+    // Rough placeholders — will be replaced once Firestore resolves
+    const weekKwh = 0;
+    const monthKwh = todayKwh;
     const estMonthlyCost = Number((monthKwh * 0.15).toFixed(2));
     const breakdown = [
       { name: 'Heating & Cooling',        percentage: 38, kwh: Number((monthKwh * 0.38).toFixed(1)), color: 'var(--color-primary)' },
@@ -136,7 +135,7 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
     ];
 
     power = {
-      id:              powerDeviceId,
+      id:              powerDeviceId || 'power-meter',
       name:            p.name || config.powerName     || 'Main Grid Meter',
       currentLoad:     Number(p.currentLoad)  || 0,
       voltage:         Number(p.voltage)      || 0,
@@ -151,12 +150,40 @@ export const fetchAllDeviceDataFromWorker = async (): Promise<{
         voltage:     Number(h.voltage)     || 0,
         currentAmps: Number(h.currentAmps) || 0,
       })) : [],
-      dailyHistory,
+      dailyHistory: [], // filled asynchronously by fetchDailyHistoryAsync()
       breakdown,
     };
   }
 
-  return { mode: 'live', sensors, power };
+  return { mode: 'live', sensors, power, powerDeviceId, energyCode };
+};
+
+/**
+ * Phase 2 (C): Fetch Firestore daily history independently so the Dashboard
+ * can call this in parallel with Phase 1 and apply the result as a follow-up
+ * setState — eliminating the sequential waterfall.
+ */
+export const fetchDailyHistoryAsync = async (
+  powerDeviceId: string,
+  energyCode: string,
+): Promise<{
+  dailyHistory: DailyPowerReading[];
+  weekKwh: number;
+  monthKwh: number;
+  estMonthlyCost: number;
+  breakdown: { name: string; percentage: number; kwh: number; color: string }[];
+}> => {
+  const dailyHistory = await fetchRealDailyPowerStats(powerDeviceId, energyCode);
+  const weekKwh  = Number(dailyHistory.slice(-7).reduce((acc, d) => acc + d.kwh, 0).toFixed(1));
+  const monthKwh = Number(dailyHistory.reduce((acc, d) => acc + d.kwh, 0).toFixed(1));
+  const estMonthlyCost = Number((monthKwh * 0.15).toFixed(2));
+  const breakdown = [
+    { name: 'Heating & Cooling',        percentage: 38, kwh: Number((monthKwh * 0.38).toFixed(1)), color: 'var(--color-primary)' },
+    { name: 'Major Appliances',          percentage: 27, kwh: Number((monthKwh * 0.27).toFixed(1)), color: 'var(--color-secondary)' },
+    { name: 'Lighting & Smart Devices',  percentage: 19, kwh: Number((monthKwh * 0.19).toFixed(1)), color: 'var(--color-accent)' },
+    { name: 'Standby / Other Devices',   percentage: 16, kwh: Number((monthKwh * 0.16).toFixed(1)), color: 'var(--color-warning)' },
+  ];
+  return { dailyHistory, weekKwh, monthKwh, estMonthlyCost, breakdown };
 };
 
 // ─── /proxy (real-time 1-second loop) ────────────────────────────────────────

@@ -8,7 +8,7 @@ import {
   fetchInstantPowerStats
 } from '../utils/deviceBridge';
 import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
-import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
+import { fetchInstantPowerFromWorkerProxy, fetchDailyHistoryAsync } from '../utils/workerService';
 import type { PowerMeter, TempSensor } from '../utils/mockData';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
@@ -101,6 +101,27 @@ export const PowerDetails: React.FC = () => {
       setPowerData(data.power);
       setSensors(data.sensors);
       setMode(data.mode);
+      setLoading(false);
+
+      // Worker mode: backfill dailyHistory from Firestore in parallel
+      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
+        try {
+          const history = await fetchDailyHistoryAsync(
+            data.powerDeviceId,
+            data.energyCode || 'add_ele',
+          );
+          setPowerData(prev => prev ? {
+            ...prev,
+            dailyHistory:   history.dailyHistory,
+            weekKwh:        history.weekKwh,
+            monthKwh:       history.monthKwh,
+            estMonthlyCost: history.estMonthlyCost,
+            breakdown:      history.breakdown,
+          } : null);
+        } catch (e) {
+          console.warn('PowerDetails: Firestore daily history fetch failed (non-fatal):', e);
+        }
+      }
 
       if (data.mode === 'live') {
         const history = await fetchRealDailyClimateStats();
@@ -132,7 +153,6 @@ export const PowerDetails: React.FC = () => {
         }
         setClimateHistory(mockHistory);
       }
-      setLoading(false);
     };
     loadData();
   }, []);

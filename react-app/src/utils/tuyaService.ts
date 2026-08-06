@@ -207,13 +207,49 @@ export const getCachedTuyaConfig = (): TuyaConfig | null => {
   return localData ? JSON.parse(localData) : null;
 };
 
+let discoveredUserIdCache: string | null = null;
+
+/**
+ * Discover user document UID in Firestore when unauthenticated or when
+ * auth.currentUser.uid has no history docs (matching Flutter's _discoverUserUid).
+ */
+export const discoverFirestoreUserId = async (): Promise<string | null> => {
+  if (discoveredUserIdCache) return discoveredUserIdCache;
+  try {
+    const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users');
+    const snap = await getDocs(colRef);
+    if (!snap.empty) {
+      discoveredUserIdCache = snap.docs[0].id;
+      return discoveredUserIdCache;
+    }
+  } catch (e) {
+    console.warn('Error discovering Firestore user ID:', e);
+  }
+  return null;
+};
+
 // Query daily energy history from Firestore collection
 export const fetchFirestoreDailyPowerStats = async (
-  userId: string
+  userId?: string
 ): Promise<{ date: string; kwh: number; peakKw: number; cost: number; hourly?: number[] }[]> => {
   try {
-    const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', userId, 'energyHistory');
-    const querySnapshot = await getDocs(colRef);
+    let targetUid = userId?.trim() || auth.currentUser?.uid;
+    if (!targetUid) {
+      targetUid = (await discoverFirestoreUserId()) || undefined;
+    }
+    if (!targetUid) return [];
+
+    let colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', targetUid, 'energyHistory');
+    let querySnapshot = await getDocs(colRef);
+
+    // Fallback: If query with targetUid returns 0 docs, try discovering another user ID document in Firestore
+    if (querySnapshot.empty) {
+      const discovered = await discoverFirestoreUserId();
+      if (discovered && discovered !== targetUid) {
+        colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', discovered, 'energyHistory');
+        querySnapshot = await getDocs(colRef);
+      }
+    }
     
     return querySnapshot.docs.map(doc => {
       const data = doc.data();
@@ -237,11 +273,26 @@ export const fetchFirestoreDailyPowerStats = async (
 
 // Query daily climate history from Firestore collection
 export const fetchFirestoreDailyClimateStats = async (
-  userId: string
+  userId?: string
 ): Promise<{ date: string; sensors: any }[]> => {
   try {
-    const colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', userId, 'climateHistory');
-    const querySnapshot = await getDocs(colRef);
+    let targetUid = userId?.trim() || auth.currentUser?.uid;
+    if (!targetUid) {
+      targetUid = (await discoverFirestoreUserId()) || undefined;
+    }
+    if (!targetUid) return [];
+
+    let colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', targetUid, 'climateHistory');
+    let querySnapshot = await getDocs(colRef);
+
+    // Fallback: If query with targetUid returns 0 docs, try discovering another user ID document in Firestore
+    if (querySnapshot.empty) {
+      const discovered = await discoverFirestoreUserId();
+      if (discovered && discovered !== targetUid) {
+        colRef = collection(db, 'artifacts', 'smart-home-apps', 'users', discovered, 'climateHistory');
+        querySnapshot = await getDocs(colRef);
+      }
+    }
     
     return querySnapshot.docs.map(doc => {
       const data = doc.data();
