@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import '../models/device_state.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/firestore_service.dart';
 import '../services/settings_service.dart';
+import '../utils/cost_utils.dart';
 
 class PowerHistoryPoint {
   final DateTime time;
@@ -30,6 +32,7 @@ class HomeProvider extends ChangeNotifier {
   List<double> _power24hWave = [];
 
   double _peakDemandKw = 0.0;
+  double _monthlyCostRsd = 0.0;
 
   SmartHomeStatus? get status => _status;
   bool get isLoading => _isLoading;
@@ -54,15 +57,15 @@ class HomeProvider extends ChangeNotifier {
     return generate24HourPowerWave(watts);
   }
 
-  double get estimatedCost {
-    final rate = settingsService?.costPerKwh ?? 0.15;
-    final cost = accumulatedKwh * 30.0 * rate;
-    return cost > 0 ? double.parse(cost.toStringAsFixed(2)) : 0.0;
-  }
+  /// Real month-to-date cost from Firestore energyHistory (high/low tariff).
+  /// 0 until signed-in history loads — no projection fallback.
+  double get estimatedCost => _monthlyCostRsd;
 
   HomeProvider({this.settingsService, this.authService}) {
     _apiService = ApiService(settingsService: settingsService, authService: authService);
+    authService?.addListener(_reloadMonthlyStats);
     refreshData();
+    _loadMonthlyStats();
     startAutoRefresh();
   }
 
@@ -70,6 +73,30 @@ class HomeProvider extends ChangeNotifier {
     settingsService = newSettings;
     _apiService = ApiService(settingsService: newSettings, authService: authService);
     refreshData();
+    _loadMonthlyStats();
+  }
+
+  void _reloadMonthlyStats() {
+    if (authService?.userUid != null) _loadMonthlyStats();
+  }
+
+  /// Loads this month's real energy history (Firestore, signed-in) so the
+  /// dashboard's monthly cost tracks real changes — never a projection.
+  Future<void> _loadMonthlyStats() async {
+    final auth = authService;
+    if (auth == null) return;
+    final uid = auth.userUid ?? settingsService?.firestoreUserId;
+    final idToken = await auth.getIdToken();
+    if (uid == null || uid.isEmpty || idToken == null || idToken.isEmpty) return;
+
+    try {
+      final history = await FirestoreService.fetchEnergyHistory(userId: uid, idToken: idToken);
+      final monthHistory = currentMonthHistory(history);
+      _monthlyCostRsd = sumMonthlyCostRsd(monthHistory);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('loadMonthlyStats error: $e');
+    }
   }
 
   void startAutoRefresh() {
@@ -207,6 +234,7 @@ class HomeProvider extends ChangeNotifier {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    authService?.removeListener(_reloadMonthlyStats);
     super.dispose();
   }
 }

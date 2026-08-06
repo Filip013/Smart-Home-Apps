@@ -301,7 +301,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     _buildStatRow('Today\'s Usage', '${todayKwh.toStringAsFixed(2)} kWh', isDark),
                     _buildStatRow('Voltage', '${volts.toStringAsFixed(1)} V', isDark),
                     _buildStatRow('Current Draw', '${amps.toStringAsFixed(2)} A', isDark),
-                    _buildStatRow('Est. Cost (Month)', '${monthlyCostRsd.toStringAsFixed(0)} RSD', isDark),
+                    _buildStatRow('Est. Cost (Month)', monthlyCostRsd > 0 ? '${monthlyCostRsd.toStringAsFixed(0)} RSD' : '—', isDark),
                   ],
                 ),
               ),

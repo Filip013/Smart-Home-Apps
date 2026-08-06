@@ -9,6 +9,7 @@ import '../providers/home_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../utils/cost_utils.dart';
 
 class PowerDetailsScreen extends StatefulWidget {
   const PowerDetailsScreen({super.key});
@@ -64,19 +65,9 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
     }
   }
 
-  /// Mirrors React Dashboard.calculateDailyCostRSD: high/low tariff
-  /// (4.15 RSD/kWh 00–08h, 13.45 RSD/kWh 08–24h) when hourly data is present,
-  /// otherwise a flat 10.66 RSD/kWh.
-  double _calculateDailyCostRsd(double kwh, [List<double>? hourly]) {
-    if (hourly != null && hourly.length == 24) {
-      double cost = 0;
-      for (var i = 0; i < 24; i++) {
-        cost += hourly[i] * (i < 8 ? 4.15 : 13.45);
-      }
-      return cost;
-    }
-    return kwh * 10.66;
-  }
+  /// Mirrors React Dashboard.calculateDailyCostRSD (see utils/cost_utils.dart).
+  double _calculateDailyCostRsd(double kwh, [List<double>? hourly]) =>
+      calculateDailyCostRsd(kwh, hourly);
 
   @override
   Widget build(BuildContext context) {
@@ -99,35 +90,12 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
           final todayCostRsd = _calculateDailyCostRsd(todayKwh);
           final co2Kg = todayKwh * 0.385;
 
-          // This calendar month only — not the last 30 days.
-          final String monthPrefix =
-              '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
-          final monthHistory = _firestoreEnergyHistory
-              .where((e) => (e['date'] as String? ?? '').startsWith(monthPrefix))
-              .toList();
-
-          // Month-to-date kWh: real history sum, else today's usage projected
-          // over the days elapsed so far this month.
-          final double monthlyKwh = monthHistory.isEmpty
-              ? todayKwh * DateTime.now().day
-              : monthHistory
-                  .map((e) => (e['kwh'] as num?)?.toDouble() ?? 0.0)
-                  .fold(0.0, (a, b) => a + b);
-
-          // Monthly cost mirrors React Dashboard: per-day high/low tariff sum
-          // over this month's real history; projection fallback when empty.
-          final double monthlyCostRsd = monthHistory.isEmpty
-              ? _calculateDailyCostRsd(monthlyKwh)
-              : monthHistory
-                  .map((e) => _calculateDailyCostRsd(
-                        (e['kwh'] as num?)?.toDouble() ?? 0.0,
-                        (e['hourly'] as List<dynamic>?)
-                                ?.whereType<num>()
-                                .map((v) => v.toDouble())
-                                .toList() ??
-                            const [],
-                      ))
-                  .fold(0.0, (a, b) => a + b);
+          // This calendar month only — real history, no projection fallback
+          // (the app tracks real monthly changes; without Firestore history
+          // the monthly figures stay empty instead of showing an estimate).
+          final monthHistory = currentMonthHistory(_firestoreEnergyHistory);
+          final double monthlyKwh = sumMonthlyKwh(monthHistory);
+          final double monthlyCostRsd = sumMonthlyCostRsd(monthHistory);
 
           // Monthly bar chart: this calendar month's real days only.
           final barGroups30d = monthHistory.asMap().entries.map((e) {
@@ -260,7 +228,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                     Expanded(
                       child: _buildKpiCard(
                         title: 'Energy Total (Month)',
-                        value: '${monthlyKwh.toStringAsFixed(1)} kWh',
+                        value: monthlyKwh > 0 ? '${monthlyKwh.toStringAsFixed(1)} kWh' : '—',
                         footer: 'This calendar month',
                         icon: LucideIcons.calendar,
                         color: const Color(0xFF6366F1),
@@ -274,7 +242,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                         title: _timeRange == '24h' ? 'Today\'s Cost' : 'Cost (Month)',
                         value: _timeRange == '24h'
                             ? '${todayCostRsd.toStringAsFixed(0)} RSD'
-                            : '${monthlyCostRsd.toStringAsFixed(0)} RSD',
+                            : (monthlyCostRsd > 0 ? '${monthlyCostRsd.toStringAsFixed(0)} RSD' : '—'),
                         footer: 'Calculated using High/Low Tariff',
                         icon: LucideIcons.dollar_sign,
                         color: const Color(0xFFF59E0B),
@@ -345,6 +313,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                                     LineChartBarData(
                                       spots: powerSpots,
                                       isCurved: true,
+                                      preventCurveOverShooting: true,
                                       color: const Color(0xFF00E5FF),
                                       barWidth: 3,
                                       isStrokeCapRound: true,
@@ -391,7 +360,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                           children: [
                             _buildSummaryStatItem('Peak Demand', '${(watts / 1000.0).toStringAsFixed(2)} kW', Colors.redAccent),
                             _buildSummaryStatItem('Average Load', '${watts.toStringAsFixed(0)} W', isDark ? Colors.white : Colors.black),
-                            _buildSummaryStatItem('Estimated Cost', _timeRange == '24h' ? '${todayCostRsd.toStringAsFixed(1)} RSD' : '${monthlyCostRsd.toStringAsFixed(1)} RSD', Colors.amberAccent),
+                            _buildSummaryStatItem('Estimated Cost', _timeRange == '24h' ? '${todayCostRsd.toStringAsFixed(1)} RSD' : (monthlyCostRsd > 0 ? '${monthlyCostRsd.toStringAsFixed(1)} RSD' : '—'), Colors.amberAccent),
                           ],
                         ),
                       ),

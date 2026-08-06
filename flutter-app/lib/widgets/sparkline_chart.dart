@@ -106,6 +106,7 @@ class MiniSparklineChart extends StatelessWidget {
                 LineChartBarData(
                   spots: spots,
                   isCurved: true,
+                  preventCurveOverShooting: true,
                   color: color,
                   barWidth: 2.5,
                   isStrokeCapRound: true,
