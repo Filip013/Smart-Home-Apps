@@ -33,8 +33,15 @@ class MiniSparklineChart extends StatelessWidget {
     }).toList();
 
     final double maxVal = values.reduce((a, b) => a > b ? a : b);
-    final double minY = 0.0;
-    final double maxY = isPowerChart ? (maxVal > 300 ? 447.0 : maxVal * 1.3) : (maxVal > 0 ? maxVal * 1.15 : 100.0);
+    final double minVal = values.reduce((a, b) => a < b ? a : b);
+    // Power charts start at 0 (natural); temp/humidity charts hug the data
+    // range so the wave isn't squashed against the top by a 0 baseline.
+    final double minY = isPowerChart
+        ? 0.0
+        : (minVal > 2 ? minVal - 1 : 0.0);
+    final double maxY = isPowerChart
+        ? (maxVal > 300 ? 447.0 : maxVal * 1.3)
+        : (maxVal > 0 ? maxVal + 1 : 100.0);
 
     const timeLabels = ['12:00', '16:00', '20:00', '00:00', '04:00', '08:00', '11:00'];
 

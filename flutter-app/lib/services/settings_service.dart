@@ -34,7 +34,7 @@ class SettingsService {
   String _memPowerDeviceName = 'Power Monitor';
   String _memPowerDeviceLoc = 'Belgrade';
   String _memTvBoxUrl = 'http://filip013.duckdns.org/live';
-  double _memCostPerKwh = 0.15;
+  double _memCostPerKwh = 10.66;
   String _memFirestoreUserId = '';
   String _memClientId = '';
   String _memClientSecret = '';
@@ -64,7 +64,11 @@ class SettingsService {
   String get powerDeviceName => _prefs?.getString(_keyPowerDeviceName) ?? _memPowerDeviceName;
   String get powerDeviceLoc => _prefs?.getString(_keyPowerDeviceLoc) ?? _memPowerDeviceLoc;
   String get tvBoxUrl => _prefs?.getString(_keyTvBoxUrl) ?? _memTvBoxUrl;
-  double get costPerKwh => _prefs?.getDouble(_keyCostPerKwh) ?? _memCostPerKwh;
+  double get costPerKwh {
+    final v = _prefs?.getDouble(_keyCostPerKwh) ?? _memCostPerKwh;
+    // 0.15 was the inherited EUR placeholder — not a valid RSD tariff.
+    return v == 0.15 ? 10.66 : v;
+  }
   String get firestoreUserId => _prefs?.getString(_keyFirestoreUserId) ?? _memFirestoreUserId;
   String get clientId => _prefs?.getString(_keyClientId) ?? _memClientId;
   String get clientSecret => _prefs?.getString(_keyClientSecret) ?? _memClientSecret;

@@ -40,8 +40,10 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
     final authService = Provider.of<AuthService>(context, listen: false);
     final provider = Provider.of<HomeProvider>(context, listen: false);
     final userUid = authService.userUid ?? provider.settingsService?.firestoreUserId;
+    final idToken = await authService.getIdToken();
 
-    final energy = await FirestoreService.fetchEnergyHistory(userId: userUid);
+    final energy =
+        await FirestoreService.fetchEnergyHistory(userId: userUid, idToken: idToken);
 
     final dateStr =
         '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
@@ -50,7 +52,8 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
 
     Map<String, dynamic>? climateDay;
     if (dateStr != todayStr) {
-      climateDay = await FirestoreService.fetchDayClimateStats(dateStr, userId: userUid);
+      climateDay =
+          await FirestoreService.fetchDayClimateStats(dateStr, userId: userUid, idToken: idToken);
     }
 
     if (mounted) {
@@ -61,7 +64,17 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
     }
   }
 
-  double _calculateDailyCostRsd(double kwh) {
+  /// Mirrors React Dashboard.calculateDailyCostRSD: high/low tariff
+  /// (4.15 RSD/kWh 00–08h, 13.45 RSD/kWh 08–24h) when hourly data is present,
+  /// otherwise a flat 10.66 RSD/kWh.
+  double _calculateDailyCostRsd(double kwh, [List<double>? hourly]) {
+    if (hourly != null && hourly.length == 24) {
+      double cost = 0;
+      for (var i = 0; i < 24; i++) {
+        cost += hourly[i] * (i < 8 ? 4.15 : 13.45);
+      }
+      return cost;
+    }
     return kwh * 10.66;
   }
 
@@ -85,6 +98,22 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
           final todayKwh = provider.accumulatedKwh > 0 ? provider.accumulatedKwh : 0.83;
           final todayCostRsd = _calculateDailyCostRsd(todayKwh);
           final co2Kg = todayKwh * 0.385;
+
+          // Monthly cost mirrors React Dashboard: sum of per-day costs with the
+          // high/low tariff from real Firestore daily history; falls back to a
+          // 30-day projection of today's usage when no history is available.
+          final double monthlyCostRsd = _firestoreEnergyHistory.isEmpty
+              ? _calculateDailyCostRsd(todayKwh * 30.0)
+              : _firestoreEnergyHistory
+                  .map((e) => _calculateDailyCostRsd(
+                        (e['kwh'] as num?)?.toDouble() ?? 0.0,
+                        (e['hourly'] as List<dynamic>?)
+                                ?.whereType<num>()
+                                .map((v) => v.toDouble())
+                                .toList() ??
+                            const [],
+                      ))
+                  .fold(0.0, (a, b) => a + b);
 
           final powerSpots = provider.power24hWave.asMap().entries.map((e) {
             return FlSpot(e.key.toDouble(), e.value);
@@ -243,7 +272,9 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                     Expanded(
                       child: _buildKpiCard(
                         title: _timeRange == '24h' ? 'Today\'s Cost' : 'Cost (Month)',
-                        value: '${todayCostRsd.toStringAsFixed(0)} RSD',
+                        value: _timeRange == '24h'
+                            ? '${todayCostRsd.toStringAsFixed(0)} RSD'
+                            : '${monthlyCostRsd.toStringAsFixed(0)} RSD',
                         footer: 'Calculated using High/Low Tariff',
                         icon: LucideIcons.dollar_sign,
                         color: const Color(0xFFF59E0B),
@@ -350,7 +381,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                           children: [
                             _buildSummaryStatItem('Peak Demand', '${(watts / 1000.0).toStringAsFixed(2)} kW', Colors.redAccent),
                             _buildSummaryStatItem('Average Load', '${watts.toStringAsFixed(0)} W', isDark ? Colors.white : Colors.black),
-                            _buildSummaryStatItem('Estimated Cost', '${todayCostRsd.toStringAsFixed(1)} RSD', Colors.amberAccent),
+                            _buildSummaryStatItem('Estimated Cost', _timeRange == '24h' ? '${todayCostRsd.toStringAsFixed(1)} RSD' : '${monthlyCostRsd.toStringAsFixed(1)} RSD', Colors.amberAccent),
                           ],
                         ),
                       ),

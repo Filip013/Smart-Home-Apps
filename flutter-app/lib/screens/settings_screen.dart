@@ -278,7 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildTextField(
               controller: _costController,
               label: 'Electricity Rate (Cost per kWh in RSD)',
-              icon: LucideIcons.dollar_sign,
+              icon: LucideIcons.banknote,
               keyboardType: TextInputType.number,
               isDark: isDark,
             ),

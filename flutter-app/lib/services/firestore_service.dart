@@ -8,7 +8,10 @@ class FirestoreService {
       'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/artifacts/smart-home-apps/users';
 
   /// Fetches daily energy records from Firestore energyHistory collection
-  static Future<List<Map<String, dynamic>>> fetchEnergyHistory({String? userId}) async {
+  static Future<List<Map<String, dynamic>>> fetchEnergyHistory({
+    String? userId,
+    String? idToken,
+  }) async {
     String targetUid = userId?.trim() ?? '';
     if (targetUid.isEmpty) {
       targetUid = await _discoverUserUid();
@@ -18,7 +21,7 @@ class FirestoreService {
     final url = Uri.parse('$baseUrl/$targetUid/energyHistory');
 
     try {
-      final response = await http.get(url);
+      final response = await http.get(url, headers: _authHeaders(idToken));
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
         final documents = data['documents'] as List<dynamic>? ?? [];
@@ -27,16 +30,22 @@ class FirestoreService {
           final String name = doc['name'] ?? '';
           final dateStr = name.split('/').last;
           final fields = doc['fields'] as Map<String, dynamic>? ?? {};
+          final unwrapped = fields.map((k, v) => MapEntry(k, _unwrapField(v)));
 
-          final kwh = _parseDouble(fields['kwh']);
-          final peakKw = _parseDouble(fields['peakKw']);
-          final cost = _parseDouble(fields['cost']);
+          final kwh = (unwrapped['kwh'] as num?)?.toDouble() ?? 0.0;
+          final peakKw = (unwrapped['peakKw'] as num?)?.toDouble() ?? 0.0;
+          final cost = (unwrapped['cost'] as num?)?.toDouble() ?? 0.0;
+          final hourlyRaw = unwrapped['hourly'];
+          final List<double> hourly = hourlyRaw is List
+              ? hourlyRaw.whereType<num>().map((v) => v.toDouble()).toList()
+              : const [];
 
           return {
             'date': dateStr,
             'kwh': kwh,
             'peakKw': peakKw,
             'cost': cost,
+            'hourly': hourly,
           };
         }).toList()
           ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
@@ -48,7 +57,11 @@ class FirestoreService {
   }
 
   /// Fetches single day power document from energyHistory collection
-  static Future<Map<String, dynamic>?> fetchDayPowerStats(String date, {String? userId}) async {
+  static Future<Map<String, dynamic>?> fetchDayPowerStats(
+    String date, {
+    String? userId,
+    String? idToken,
+  }) async {
     String targetUid = userId?.trim() ?? '';
     if (targetUid.isEmpty) {
       targetUid = await _discoverUserUid();
@@ -57,7 +70,7 @@ class FirestoreService {
 
     final url = Uri.parse('$baseUrl/$targetUid/energyHistory/$date');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url, headers: _authHeaders(idToken));
       if (response.statusCode == 200) {
         final Map<String, dynamic> doc = json.decode(response.body);
         final fields = doc['fields'] as Map<String, dynamic>? ?? {};
@@ -78,7 +91,10 @@ class FirestoreService {
   }
 
   /// Fetches daily climate records from Firestore climateHistory collection
-  static Future<List<Map<String, dynamic>>> fetchClimateHistory({String? userId}) async {
+  static Future<List<Map<String, dynamic>>> fetchClimateHistory({
+    String? userId,
+    String? idToken,
+  }) async {
     String targetUid = userId?.trim() ?? '';
     if (targetUid.isEmpty) {
       targetUid = await _discoverUserUid();
@@ -88,7 +104,7 @@ class FirestoreService {
     final url = Uri.parse('$baseUrl/$targetUid/climateHistory');
 
     try {
-      final response = await http.get(url);
+      final response = await http.get(url, headers: _authHeaders(idToken));
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
         final documents = data['documents'] as List<dynamic>? ?? [];
@@ -110,7 +126,11 @@ class FirestoreService {
   }
 
   /// Fetches single day climate document from climateHistory collection
-  static Future<Map<String, dynamic>?> fetchDayClimateStats(String date, {String? userId}) async {
+  static Future<Map<String, dynamic>?> fetchDayClimateStats(
+    String date, {
+    String? userId,
+    String? idToken,
+  }) async {
     String targetUid = userId?.trim() ?? '';
     if (targetUid.isEmpty) {
       targetUid = await _discoverUserUid();
@@ -119,7 +139,7 @@ class FirestoreService {
 
     final url = Uri.parse('$baseUrl/$targetUid/climateHistory/$date');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url, headers: _authHeaders(idToken));
       if (response.statusCode == 200) {
         final Map<String, dynamic> doc = json.decode(response.body);
         return doc['fields'] as Map<String, dynamic>?;
@@ -157,6 +177,11 @@ class FirestoreService {
     }
     return null;
   }
+
+  static Map<String, String> _authHeaders(String? idToken) => {
+        if (idToken != null && idToken.isNotEmpty)
+          'Authorization': 'Bearer $idToken',
+      };
 
   static dynamic _unwrapField(dynamic field) {
     if (field is! Map<String, dynamic>) return null;
