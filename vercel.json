@@ -1,7 +1,7 @@
 {
-  "framework": "vite",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
+  "buildCommand": "cd react-app && npm run build",
+  "outputDirectory": "react-app/dist",
+  "installCommand": "cd react-app && npm install",
   "cleanUrls": true,
   "headers": [
     {
