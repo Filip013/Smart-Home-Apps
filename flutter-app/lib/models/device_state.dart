@@ -29,7 +29,8 @@ class SensorDevice {
     this.batteryPercentage,
     this.batteryState,
     this.isOnline = true,
-    this.maxTempThreshold = 35.0,
+    // Mirrors React's "exceeds optimal threshold" (>28C, greenhouse alert).
+    this.maxTempThreshold = 28.0,
     this.minTempThreshold = 10.0,
     this.history = const [],
   });

@@ -442,6 +442,30 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
     final activeColor = isTemp ? color : const Color(0xFF38BDF8);
 
+    // Comfort evaluation mirrors React Dashboard (source of truth):
+    // humidity > 70 -> 'High Humidity' (or 'Humid (Normal)' for the
+    // greenhouse), else temp > 27 -> 'Warm', else 'Optimal'.
+    final bool isGreenhouse = (dev?.id ?? fallbackId).toLowerCase().contains('greenhouse') ||
+        name.toLowerCase().contains('greenhouse');
+    final String comfortStatus;
+    final Color comfortColor;
+    final Color comfortBg;
+    if (humVal > 70) {
+      comfortStatus = isGreenhouse ? 'Humid (Normal)' : 'High Humidity';
+      comfortColor = isGreenhouse ? const Color(0xFF34D399) : const Color(0xFFF59E0B);
+      comfortBg = isGreenhouse
+          ? const Color(0xFF10B981).withValues(alpha: 0.15)
+          : const Color(0xFFF59E0B).withValues(alpha: 0.15);
+    } else if (tempVal > 27) {
+      comfortStatus = 'Warm';
+      comfortColor = const Color(0xFFF59E0B);
+      comfortBg = const Color(0xFFF59E0B).withValues(alpha: 0.15);
+    } else {
+      comfortStatus = 'Optimal';
+      comfortColor = const Color(0xFF34D399);
+      comfortBg = const Color(0xFF10B981).withValues(alpha: 0.15);
+    }
+
     final panelBg = isDark
         ? const Color(0xFF1E2942).withValues(alpha: 0.5)
         : Colors.grey.withValues(alpha: 0.08);
@@ -476,10 +500,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                      color: comfortBg,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text('Optimal', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF34D399), fontWeight: FontWeight.bold)),
+                    child: Text(comfortStatus, style: GoogleFonts.inter(fontSize: 11, color: comfortColor, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(width: 8),
                   Row(

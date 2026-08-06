@@ -31,3 +31,5 @@ __pycache__/
 tuya-realtime/config.json
 tuya-realtime/tinytuya.json
 tuya-realtime/devices.json
+# Cloudflare wrangler local cache
+cloudflare-proxy/.wrangler/
