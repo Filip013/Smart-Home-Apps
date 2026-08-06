@@ -90,7 +90,8 @@ class FirestoreService {
     return null;
   }
 
-  /// Fetches daily climate records from Firestore climateHistory collection
+  /// Fetches daily climate records from Firestore climateHistory collection.
+  /// Each doc is `{sensor1: {avgTemp, avgHumidity, ...}, sensor2: {...}}`.
   static Future<List<Map<String, dynamic>>> fetchClimateHistory({
     String? userId,
     String? idToken,
@@ -112,9 +113,15 @@ class FirestoreService {
         return documents.map((doc) {
           final String name = doc['name'] ?? '';
           final dateStr = name.split('/').last;
+          final fields = doc['fields'] as Map<String, dynamic>? ?? {};
+          final unwrapped = fields.map((k, v) => MapEntry(k, _unwrapField(v)));
+
           return {
             'date': dateStr,
-            'raw': doc['fields'],
+            'sensors': {
+              'sensor1': unwrapped['sensor1'] is Map ? unwrapped['sensor1'] : <String, dynamic>{},
+              'sensor2': unwrapped['sensor2'] is Map ? unwrapped['sensor2'] : <String, dynamic>{},
+            },
           };
         }).toList()
           ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
