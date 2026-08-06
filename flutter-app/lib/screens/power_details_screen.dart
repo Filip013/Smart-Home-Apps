@@ -99,12 +99,26 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
           final todayCostRsd = _calculateDailyCostRsd(todayKwh);
           final co2Kg = todayKwh * 0.385;
 
-          // Monthly cost mirrors React Dashboard: sum of per-day costs with the
-          // high/low tariff from real Firestore daily history; falls back to a
-          // 30-day projection of today's usage when no history is available.
-          final double monthlyCostRsd = _firestoreEnergyHistory.isEmpty
-              ? _calculateDailyCostRsd(todayKwh * 30.0)
-              : _firestoreEnergyHistory
+          // This calendar month only — not the last 30 days.
+          final String monthPrefix =
+              '${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}';
+          final monthHistory = _firestoreEnergyHistory
+              .where((e) => (e['date'] as String? ?? '').startsWith(monthPrefix))
+              .toList();
+
+          // Month-to-date kWh: real history sum, else today's usage projected
+          // over the days elapsed so far this month.
+          final double monthlyKwh = monthHistory.isEmpty
+              ? todayKwh * DateTime.now().day
+              : monthHistory
+                  .map((e) => (e['kwh'] as num?)?.toDouble() ?? 0.0)
+                  .fold(0.0, (a, b) => a + b);
+
+          // Monthly cost mirrors React Dashboard: per-day high/low tariff sum
+          // over this month's real history; projection fallback when empty.
+          final double monthlyCostRsd = monthHistory.isEmpty
+              ? _calculateDailyCostRsd(monthlyKwh)
+              : monthHistory
                   .map((e) => _calculateDailyCostRsd(
                         (e['kwh'] as num?)?.toDouble() ?? 0.0,
                         (e['hourly'] as List<dynamic>?)
@@ -260,8 +274,8 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                     Expanded(
                       child: _buildKpiCard(
                         title: 'Energy Total (Month)',
-                        value: '${(todayKwh * 30).toStringAsFixed(1)} kWh',
-                        footer: 'Days Recorded: 30',
+                        value: '${monthlyKwh.toStringAsFixed(1)} kWh',
+                        footer: 'This calendar month',
                         icon: LucideIcons.calendar,
                         color: const Color(0xFF6366F1),
                         isDark: isDark,
