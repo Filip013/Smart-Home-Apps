@@ -14,13 +14,19 @@ class CircularPowerGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final progress = (watts / maxWatts).clamp(0.0, 1.0);
 
     return SizedBox(
       width: 170,
       height: 170,
       child: CustomPaint(
-        painter: _GaugePainter(progress: progress),
+        painter: _GaugePainter(
+          progress: progress,
+          trackColor: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.08),
+        ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -30,7 +36,7 @@ class CircularPowerGauge extends StatelessWidget {
                 style: GoogleFonts.outfit(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                   height: 1.0,
                 ),
               ),
@@ -48,7 +54,7 @@ class CircularPowerGauge extends StatelessWidget {
                 'Active Load',
                 style: GoogleFonts.inter(
                   fontSize: 11,
-                  color: Colors.white54,
+                  color: isDark ? Colors.white54 : Colors.black54,
                 ),
               ),
             ],
@@ -61,8 +67,9 @@ class CircularPowerGauge extends StatelessWidget {
 
 class _GaugePainter extends CustomPainter {
   final double progress;
+  final Color trackColor;
 
-  _GaugePainter({required this.progress});
+  _GaugePainter({required this.progress, required this.trackColor});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -74,7 +81,7 @@ class _GaugePainter extends CustomPainter {
 
     // Background track arc
     final trackPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = trackColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10
       ..strokeCap = StrokeCap.round;
@@ -108,7 +115,6 @@ class _GaugePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GaugePainter oldDelegate) {
-    return oldDelegate.progress != progress;
-  }
+  bool shouldRepaint(covariant _GaugePainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.trackColor != trackColor;
 }

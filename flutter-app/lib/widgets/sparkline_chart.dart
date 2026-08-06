@@ -24,6 +24,10 @@ class MiniSparklineChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (values.isEmpty) return const SizedBox.shrink();
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final axisColor = isDark ? Colors.white38 : Colors.black45;
+    final titleColor = isDark ? Colors.white54 : Colors.black54;
+
     final spots = values.asMap().entries.map((e) {
       return FlSpot(e.key.toDouble(), e.value);
     }).toList();
@@ -42,7 +46,7 @@ class MiniSparklineChart extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 12,
             fontWeight: FontWeight.w500,
-            color: Colors.white54,
+            color: titleColor,
           ),
         ),
         const SizedBox(height: 8),
@@ -62,7 +66,7 @@ class MiniSparklineChart extends StatelessWidget {
                       if (val == minY || val == maxY || (val - (maxY / 2)).abs() < (maxY / 4)) {
                         return Text(
                           val.toStringAsFixed(0),
-                          style: GoogleFonts.firaCode(fontSize: 9, color: Colors.white38),
+                          style: GoogleFonts.firaCode(fontSize: 9, color: axisColor),
                         );
                       }
                       return const SizedBox.shrink();
@@ -79,7 +83,7 @@ class MiniSparklineChart extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 4.0),
                           child: Text(
                             timeLabels[idx ~/ 3],
-                            style: GoogleFonts.firaCode(fontSize: 9, color: Colors.white38),
+                            style: GoogleFonts.firaCode(fontSize: 9, color: axisColor),
                           ),
                         );
                       }

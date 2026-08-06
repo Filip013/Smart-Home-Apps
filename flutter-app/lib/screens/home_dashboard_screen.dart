@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/device_state.dart';
 import '../providers/home_provider.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/circular_gauge_painter.dart';
 import '../widgets/sparkline_chart.dart';
 
@@ -22,8 +23,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Provider.of<ThemeProvider>(context).isDarkMode;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0F19),
+      backgroundColor: isDark ? const Color(0xFF0B0F19) : const Color(0xFFF8FAFC),
       body: Consumer<HomeProvider>(
         builder: (context, provider, child) {
           final status = provider.status;
@@ -74,7 +77,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildHeroHeader(context, watts, devices.where((d) => d.isOnline).length + (power?.status == 'online' ? 1 : 0)),
+                    _buildHeroHeader(context, watts, devices.where((d) => d.isOnline).length + (power?.status == 'online' ? 1 : 0), isDark),
                     const SizedBox(height: 24),
                     if (isWide)
                       Row(
@@ -82,25 +85,25 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         children: [
                           Expanded(
                             flex: 5,
-                            child: _buildPowerCard(provider, watts, volts, amps, todayKwh, monthlyCostRsd, powerWave),
+                            child: _buildPowerCard(provider, watts, volts, amps, todayKwh, monthlyCostRsd, powerWave, isDark),
                           ),
                           const SizedBox(width: 24),
                           Expanded(
                             flex: 5,
-                            child: _buildClimateCard(provider, dev1, dev2),
+                            child: _buildClimateCard(provider, dev1, dev2, isDark),
                           ),
                         ],
                       )
                     else
                       Column(
                         children: [
-                          _buildPowerCard(provider, watts, volts, amps, todayKwh, monthlyCostRsd, powerWave),
+                          _buildPowerCard(provider, watts, volts, amps, todayKwh, monthlyCostRsd, powerWave, isDark),
                           const SizedBox(height: 24),
-                          _buildClimateCard(provider, dev1, dev2),
+                          _buildClimateCard(provider, dev1, dev2, isDark),
                         ],
                       ),
                     const SizedBox(height: 24),
-                    _buildSmartEfficiencyCoach(standbyWatts, coachTips),
+                    _buildSmartEfficiencyCoach(standbyWatts, coachTips, isDark),
                   ],
                 ),
               );
@@ -111,13 +114,20 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildHeroHeader(BuildContext context, double totalWatts, int onlineCount) {
+  Widget _buildHeroHeader(BuildContext context, double totalWatts, int onlineCount, bool isDark) {
+    final cardBg = isDark ? const Color(0xFF131B2E) : Colors.white;
+    final panelBg = isDark ? const Color(0xFF1E2942) : Colors.grey.withValues(alpha: 0.1);
+    final border = isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black12;
+    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
+    final textSecondary = isDark ? Colors.white54 : Colors.black54;
+    final textTertiary = isDark ? Colors.white38 : Colors.black45;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF131B2E),
+        color: cardBg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: border),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -132,7 +142,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     style: GoogleFonts.outfit(
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: textPrimary,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -170,7 +180,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               const SizedBox(height: 4),
               Text(
                 'Here\'s what\'s happening in your connected home today.',
-                style: GoogleFonts.inter(fontSize: 14, color: Colors.white54),
+                style: GoogleFonts.inter(fontSize: 14, color: textSecondary),
               ),
             ],
           ),
@@ -179,9 +189,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E2942),
+                  color: panelBg,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                  border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black12),
                 ),
                 child: Row(
                   children: [
@@ -197,8 +207,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('TOTAL GRID LOAD', style: GoogleFonts.firaCode(fontSize: 10, color: Colors.white38, fontWeight: FontWeight.bold)),
-                        Text('${totalWatts.toStringAsFixed(1)} W', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                        Text('TOTAL GRID LOAD', style: GoogleFonts.firaCode(fontSize: 10, color: textTertiary, fontWeight: FontWeight.bold)),
+                        Text('${totalWatts.toStringAsFixed(1)} W', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
                       ],
                     ),
                   ],
@@ -208,9 +218,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E2942),
+                  color: panelBg,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                  border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black12),
                 ),
                 child: Row(
                   children: [
@@ -226,8 +236,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('DEVICE STATUS', style: GoogleFonts.firaCode(fontSize: 10, color: Colors.white38, fontWeight: FontWeight.bold)),
-                        Text('$onlineCount Online', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                        Text('DEVICE STATUS', style: GoogleFonts.firaCode(fontSize: 10, color: textTertiary, fontWeight: FontWeight.bold)),
+                        Text('$onlineCount Online', style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
                       ],
                     ),
                   ],
@@ -240,13 +250,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildPowerCard(HomeProvider provider, double watts, double volts, double amps, double todayKwh, double monthlyCostRsd, List<double> powerWave) {
+  Widget _buildPowerCard(HomeProvider provider, double watts, double volts, double amps, double todayKwh, double monthlyCostRsd, List<double> powerWave, bool isDark) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF131B2E),
+        color: isDark ? const Color(0xFF131B2E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,7 +273,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                     style: GoogleFonts.outfit(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
                     ),
                   ),
                 ],
@@ -288,10 +298,10 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Expanded(
                 child: Column(
                   children: [
-                    _buildStatRow('Today\'s Usage', '${todayKwh.toStringAsFixed(2)} kWh'),
-                    _buildStatRow('Voltage', '${volts.toStringAsFixed(1)} V'),
-                    _buildStatRow('Current Draw', '${amps.toStringAsFixed(2)} A'),
-                    _buildStatRow('Est. Cost (Month)', '${monthlyCostRsd.toStringAsFixed(0)} RSD'),
+                    _buildStatRow('Today\'s Usage', '${todayKwh.toStringAsFixed(2)} kWh', isDark),
+                    _buildStatRow('Voltage', '${volts.toStringAsFixed(1)} V', isDark),
+                    _buildStatRow('Current Draw', '${amps.toStringAsFixed(2)} A', isDark),
+                    _buildStatRow('Est. Cost (Month)', '${monthlyCostRsd.toStringAsFixed(0)} RSD', isDark),
                   ],
                 ),
               ),
@@ -310,26 +320,26 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildStatRow(String label, String value) {
+  Widget _buildStatRow(String label, String value, bool isDark) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.inter(fontSize: 13, color: Colors.white54)),
-          Text(value, style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+          Text(label, style: GoogleFonts.inter(fontSize: 13, color: isDark ? Colors.white54 : Colors.black54)),
+          Text(value, style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A))),
         ],
       ),
     );
   }
 
-  Widget _buildClimateCard(HomeProvider provider, SensorDevice? dev1, SensorDevice? dev2) {
+  Widget _buildClimateCard(HomeProvider provider, SensorDevice? dev1, SensorDevice? dev2, bool isDark) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF131B2E),
+        color: isDark ? const Color(0xFF131B2E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -343,7 +353,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                 ),
               ),
             ],
@@ -360,6 +370,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             fallbackHum: 55,
             fallbackBat: 100,
             color: const Color(0xFF818CF8),
+            isDark: isDark,
           ),
           const SizedBox(height: 24),
 
@@ -373,6 +384,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
             fallbackHum: 48,
             fallbackBat: 79,
             color: const Color(0xFFA78BFA),
+            isDark: isDark,
           ),
         ],
       ),
@@ -388,13 +400,28 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     required int fallbackHum,
     required int fallbackBat,
     required Color color,
+    required bool isDark,
   }) {
-    final id = dev?.id ?? fallbackName;
+    // Key chart waves by the real device id (Power & Climate tab does the same);
+    // fall back to the known hardware id so lookups stay consistent.
+    final fallbackId = fallbackName.contains('Belgrade')
+        ? 'bf8b4017359259c5b2jnfn'
+        : 'bf20f914e6de81daa9ylvi';
+    final id = dev?.id ?? fallbackId;
     final name = dev?.name ?? fallbackName;
     final location = dev?.location ?? fallbackLoc;
-    final tempVal = dev?.temperature ?? fallbackTemp;
-    final humVal = dev?.humidity ?? fallbackHum;
-    final batVal = dev?.batteryPercentage ?? fallbackBat;
+
+    // Guarded extraction mirrors power_details_screen: 0 / missing values must
+    // fall back instead of rendering "0.0°C" / "0%".
+    final tempVal = (dev?.temperature != null && dev!.temperature! > 0)
+        ? dev.temperature!
+        : fallbackTemp;
+    final humVal = (dev?.humidity != null && dev!.humidity! > 0)
+        ? dev.humidity!
+        : fallbackHum;
+    final batVal = (dev?.batteryPercentage != null && dev!.batteryPercentage! > 0)
+        ? dev.batteryPercentage!
+        : fallbackBat;
 
     final selectedMetric = _selectedMetric[id] ?? 'temp';
     final isTemp = selectedMetric == 'temp';
@@ -403,21 +430,33 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     final humStr = '$humVal%';
     final batStr = '$batVal%';
 
-    final realTempWave = provider.sensorTempWaves[id];
-    final realHumidWave = provider.sensorHumidWaves[id];
+    final List<double>? wave = isTemp
+        ? provider.sensorTempWaves[id]
+        : provider.sensorHumidWaves[id];
 
-    final List<double> waveData = isTemp
-        ? (realTempWave ?? HomeProvider.generate24HourTempWave(tempVal))
-        : (realHumidWave ?? HomeProvider.generate24HourHumidWave(humVal));
+    final List<double> waveData = (wave != null && wave.isNotEmpty)
+        ? wave
+        : (isTemp
+            ? HomeProvider.generate24HourTempWave(tempVal)
+            : HomeProvider.generate24HourHumidWave(humVal));
 
     final activeColor = isTemp ? color : const Color(0xFF38BDF8);
+
+    final panelBg = isDark
+        ? const Color(0xFF1E2942).withValues(alpha: 0.5)
+        : Colors.grey.withValues(alpha: 0.08);
+    final innerBg = isDark ? const Color(0xFF1E2942) : Colors.grey.withValues(alpha: 0.1);
+    final border = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black12;
+    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
+    final textSecondary = isDark ? Colors.white54 : Colors.black54;
+    final textTertiary = isDark ? Colors.white38 : Colors.black45;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2942).withValues(alpha: 0.5),
+        color: panelBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+        border: Border.all(color: border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -428,8 +467,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text(location, style: GoogleFonts.inter(fontSize: 11, color: Colors.white38)),
+                  Text(name, style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary)),
+                  Text(location, style: GoogleFonts.inter(fontSize: 11, color: textTertiary)),
                 ],
               ),
               Row(
@@ -445,9 +484,9 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   const SizedBox(width: 8),
                   Row(
                     children: [
-                      const Icon(LucideIcons.battery, size: 14, color: Colors.white54),
+                      Icon(LucideIcons.battery, size: 14, color: textSecondary),
                       const SizedBox(width: 4),
-                      Text(batStr, style: GoogleFonts.firaCode(fontSize: 11, color: Colors.white54)),
+                      Text(batStr, style: GoogleFonts.firaCode(fontSize: 11, color: textSecondary)),
                     ],
                   ),
                 ],
@@ -463,7 +502,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E2942),
+                      color: innerBg,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isTemp ? const Color(0xFF6366F1) : Colors.transparent,
@@ -477,8 +516,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(tempStr, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                            Text('TEMPERATURE', style: GoogleFonts.firaCode(fontSize: 9, color: Colors.white38, fontWeight: FontWeight.bold)),
+                            Text(tempStr, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary)),
+                            Text('TEMPERATURE', style: GoogleFonts.firaCode(fontSize: 9, color: textTertiary, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ],
@@ -493,7 +532,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E2942),
+                      color: innerBg,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: !isTemp ? const Color(0xFF38BDF8) : Colors.transparent,
@@ -507,8 +546,8 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(humStr, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                            Text('HUMIDITY', style: GoogleFonts.firaCode(fontSize: 9, color: Colors.white38, fontWeight: FontWeight.bold)),
+                            Text(humStr, style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary)),
+                            Text('HUMIDITY', style: GoogleFonts.firaCode(fontSize: 9, color: textTertiary, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ],
@@ -530,13 +569,13 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
     );
   }
 
-  Widget _buildSmartEfficiencyCoach(int standbyWatts, List<String> tips) {
+  Widget _buildSmartEfficiencyCoach(int standbyWatts, List<String> tips, bool isDark) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF131B2E),
+        color: isDark ? const Color(0xFF131B2E) : Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -550,7 +589,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
                 ),
               ),
             ],
@@ -558,7 +597,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
           const SizedBox(height: 12),
           Text(
             'Your estimated standby load is $standbyWatts Watts based on 24h minimum power draw.',
-            style: GoogleFonts.inter(fontSize: 14, color: Colors.white70),
+            style: GoogleFonts.inter(fontSize: 14, color: isDark ? Colors.white70 : Colors.black87),
           ),
           const SizedBox(height: 16),
           Column(
@@ -568,7 +607,7 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
                 child: Text(
                   tip,
-                  style: GoogleFonts.inter(fontSize: 13, color: Colors.white54),
+                  style: GoogleFonts.inter(fontSize: 13, color: isDark ? Colors.white54 : Colors.black54),
                 ),
               );
             }).toList(),
