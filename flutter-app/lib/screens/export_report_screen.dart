@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_lucide/flutter_lucide.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/home_provider.dart';
@@ -127,6 +130,121 @@ class _ExportReportScreenState extends State<ExportReportScreen> {
       ].join(','));
     }
     return lines.join('\n');
+  }
+
+  /// Prints the monthly report via the OS print dialog (Windows/web) or the
+  /// share/save sheet on mobile — mirrors React's printable sheet.
+  Future<void> _printReport(List<Map<String, dynamic>> rows) async {
+    final monthKwh = sumMonthlyKwh(_monthEnergy);
+    final monthCost = sumMonthlyCostRsd(_monthEnergy);
+
+    pw.Widget metric(String label, String value) => pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400),
+              borderRadius: pw.BorderRadius.circular(4),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(label.toUpperCase(),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                pw.SizedBox(height: 4),
+                pw.Text(value,
+                    style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+          ),
+        );
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (ctx) => [
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('CONSUMPTION & CLIMATE REPORT',
+                      style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('Smart Home Energy & Environment Log',
+                      style: pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text('Selected Month: $_month',
+                      style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                  pw.Text('Climate Source: $_sensorKey',
+                      style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                  pw.Text('Generated: ${DateTime.now().toLocal().toString().substring(0, 10)}',
+                      style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+                ],
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 16),
+          pw.Divider(),
+          pw.SizedBox(height: 16),
+          pw.Row(
+            children: [
+              metric('Total Monthly Consumption', '${monthKwh.toStringAsFixed(1)} kWh'),
+              pw.SizedBox(width: 24),
+              metric('Total Estimated Cost', '${monthCost.toStringAsFixed(0)} RSD'),
+            ],
+          ),
+          pw.SizedBox(height: 24),
+          pw.TableHelper.fromTextArray(
+            headers: const [
+              'Date',
+              'Energy (kWh)',
+              'Daily Cost (RSD)',
+              'Avg Temp (°C)',
+              'Avg Humidity (%)',
+            ],
+            data: rows
+                .map((r) => [
+                      r['date'] as String,
+                      _num(r['kwh'] as num?, 1),
+                      _num(r['cost'] as num?, 1),
+                      _num(r['temp'] as num?, 1),
+                      _num(r['humidity'] as num?, 0),
+                    ])
+                .toList(),
+            headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            cellStyle: pw.TextStyle(fontSize: 9),
+            headerDecoration: pw.BoxDecoration(color: PdfColors.blueGrey100),
+            cellAlignments: const {
+              0: pw.Alignment.centerLeft,
+              1: pw.Alignment.centerRight,
+              2: pw.Alignment.centerRight,
+              3: pw.Alignment.centerRight,
+              4: pw.Alignment.centerRight,
+            },
+            columnWidths: const {
+              0: pw.FlexColumnWidth(2),
+              1: pw.FlexColumnWidth(2.4),
+              2: pw.FlexColumnWidth(2.6),
+              3: pw.FlexColumnWidth(2.2),
+              4: pw.FlexColumnWidth(2.6),
+            },
+          ),
+          pw.SizedBox(height: 24),
+          pw.Divider(),
+          pw.SizedBox(height: 8),
+          pw.Text('Historical Summary Report // AetherSmart Home Analytics',
+              style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (format) async => doc.save());
   }
 
   @override
@@ -322,48 +440,64 @@ class _ExportReportScreenState extends State<ExportReportScreen> {
             _buildTable(monthRows, isDark),
             const SizedBox(height: 16),
 
-            Row(
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: monthRows.isEmpty
-                        ? null
-                        : () => _showDataDialog(
-                              context,
-                              'smart_home_report_$_month.csv',
-                              _csvFor(monthRows),
-                            ),
-                    icon: const Icon(LucideIcons.file_down, size: 16),
-                    label: const Text('Export Month CSV'),
-                  ),
+                _exportButton(
+                  label: 'Export Month CSV',
+                  icon: LucideIcons.file_down,
+                  color: const Color(0xFF6366F1),
+                  onPressed: monthRows.isEmpty
+                      ? null
+                      : () => _showDataDialog(
+                            context,
+                            'smart_home_report_$_month.csv',
+                            _csvFor(monthRows),
+                          ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: fullRows.isEmpty
-                        ? null
-                        : () => _showDataDialog(
-                              context,
-                              'smart_home_full_history_${DateTime.now().toIso8601String().substring(0, 10)}.csv',
-                              _csvFor(fullRows),
-                            ),
-                    icon: const Icon(LucideIcons.database, size: 16),
-                    label: const Text('Export Full History CSV'),
-                  ),
+                _exportButton(
+                  label: 'Export Full History CSV',
+                  icon: LucideIcons.database,
+                  color: const Color(0xFF10B981),
+                  onPressed: fullRows.isEmpty
+                      ? null
+                      : () => _showDataDialog(
+                            context,
+                            'smart_home_full_history_${DateTime.now().toIso8601String().substring(0, 10)}.csv',
+                            _csvFor(fullRows),
+                          ),
+                ),
+                _exportButton(
+                  label: 'Print / Save PDF Report',
+                  icon: LucideIcons.printer,
+                  color: const Color(0xFFF59E0B),
+                  onPressed:
+                      monthRows.isEmpty ? null : () => _printReport(monthRows),
                 ),
               ],
             ),
           ],
         ],
       ),
+    );
+  }
+
+  Widget _exportButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    return ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(label),
     );
   }
 
