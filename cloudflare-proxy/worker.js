@@ -407,6 +407,16 @@ function processPowerHistory(logs, fallbackLoad = 0, pCode = 'cur_power', timezo
 }
 
 // Helper to resolve configuration from URL params, Cloudflare KV namespace, or env vars
+// ---- History cache (Tuya rate-limit guard) ----
+// Tuya cloud throttles report-logs hard; live device status (1 call/device)
+// is cheap and the local TV Box daemon is free. The 24h histories (temp
+// history, hourly power, today's kWh) are therefore re-queried at most once
+// per HISTORY_CACHE_TTL_MS and served from cache in between — otherwise the
+// app's 10s polling burns the rate limit and values collapse to 0. When a
+// refresh comes back empty (rate-limited), the last good values are kept.
+const HISTORY_CACHE_TTL_MS = 5 * 60 * 1000;
+let historyCache = null; // { key, ts, sensor1, sensor2, power }
+
 async function getConfig(env, url) {
   let kvConfig = null;
   const uid = url.searchParams.get('uid') || 'default';
@@ -486,6 +496,15 @@ export default {
         const endTime = Date.now();
         const startTime = endTime - 24 * 60 * 60 * 1000;
 
+        // Rate-limit guard: reuse cached 24h histories when fresh.
+        const historyKey = [
+          config.tempDeviceId1, config.tempDeviceId2, config.powerDeviceId,
+          config.tempCode1, config.tempCode2, config.powerCode, config.energyCode,
+          config.timezone
+        ].join('|');
+        const cacheFresh = historyCache && historyCache.key === historyKey &&
+          (Date.now() - historyCache.ts) < HISTORY_CACHE_TTL_MS;
+
         let sensor1Err = null;
         let sensor2Err = null;
         let powerErr = null;
@@ -507,8 +526,13 @@ export default {
               const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
               const battery = batVal !== undefined ? Number(batVal) : 0;
 
-              const logs = await fetchAllReportLogs(env, config.tempDeviceId1, `${config.tempCode1},${config.humCode1}`, startTime, endTime, creds);
-              const history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode1, config.humCode1, config.timezone);
+              let history;
+              if (cacheFresh && historyCache.sensor1) {
+                history = historyCache.sensor1;
+              } else {
+                const logs = await fetchAllReportLogs(env, config.tempDeviceId1, `${config.tempCode1},${config.humCode1}`, startTime, endTime, creds);
+                history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode1, config.humCode1, config.timezone);
+              }
 
               return {
                 id: config.tempDeviceId1,
@@ -542,8 +566,13 @@ export default {
               const currentHumidity = humVal !== undefined ? scaleHumidity(humVal) : 0;
               const battery = batVal !== undefined ? Number(batVal) : 0;
 
-              const logs = await fetchAllReportLogs(env, config.tempDeviceId2, `${config.tempCode2},${config.humCode2}`, startTime, endTime, creds);
-              const history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode2, config.humCode2, config.timezone);
+              let history;
+              if (cacheFresh && historyCache.sensor2) {
+                history = historyCache.sensor2;
+              } else {
+                const logs = await fetchAllReportLogs(env, config.tempDeviceId2, `${config.tempCode2},${config.humCode2}`, startTime, endTime, creds);
+                history = processTempHistory(logs, currentTemp, currentHumidity, config.tempCode2, config.humCode2, config.timezone);
+              }
 
               return {
                 id: config.tempDeviceId2,
@@ -578,40 +607,47 @@ export default {
               const voltage = vVal !== undefined ? Number(scaleVoltage(vVal).toFixed(1)) : 0;
               const currentAmps = iVal !== undefined ? Number(scaleCurrent(iVal).toFixed(2)) : (currentLoad > 0 ? Number((currentLoad / 230).toFixed(2)) : 0);
 
-              const logs = await fetchAllReportLogs(env, config.powerDeviceId, config.powerCode, startTime, endTime, creds);
-              // Fetch add_ele over the full 24h window too, so hours without cur_power
-              // reports (e.g. consumer off / steady draw) can be filled from energy deltas.
-              let energyLogs24h = [];
-              try {
-                energyLogs24h = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, startTime, endTime, creds);
-              } catch (energyErr) {
-                console.error('Error fetching 24h energy logs:', energyErr);
-              }
-              const hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone, energyLogs24h);
-
+              let hourlyHistory;
               let todayKwh = 0;
               let energyDebug = { path: 'none', energyLogsCount: 0, sumRaw: 0, midnight: 0, eVal: eVal };
-              
-              try {
-                const midnight = getLocalMidnightTime(config.timezone);
-                energyDebug.midnight = midnight;
-                
-                const energyLogs = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, midnight, endTime, creds);
-                energyDebug.energyLogsCount = energyLogs.length;
-                
-                if (energyLogs.length > 0) {
-                  const sumRaw = energyLogs.reduce((acc, l) => acc + (Number(l.value) || 0), 0);
-                  energyDebug.sumRaw = sumRaw;
-                  todayKwh = Number((sumRaw / 1000).toFixed(2));
-                  energyDebug.path = 'logs_sum_div_1000';
-                }
-              } catch (eErr) {
-                energyDebug.path = 'error: ' + (eErr.message || String(eErr));
-              }
 
-              if (todayKwh === 0 && eVal !== undefined) {
-                todayKwh = scaleEnergyKwh(eVal);
-                energyDebug.path = 'fallback_scaleEnergyKwh';
+              if (cacheFresh && historyCache.power) {
+                hourlyHistory = historyCache.power.hourlyHistory;
+                todayKwh = historyCache.power.todayKwh;
+                energyDebug = historyCache.power.energyDebug;
+              } else {
+                const logs = await fetchAllReportLogs(env, config.powerDeviceId, config.powerCode, startTime, endTime, creds);
+                // Fetch add_ele over the full 24h window too, so hours without cur_power
+                // reports (e.g. consumer off / steady draw) can be filled from energy deltas.
+                let energyLogs24h = [];
+                try {
+                  energyLogs24h = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, startTime, endTime, creds);
+                } catch (energyErr) {
+                  console.error('Error fetching 24h energy logs:', energyErr);
+                }
+                hourlyHistory = processPowerHistory(logs, currentLoad, config.powerCode, config.timezone, energyLogs24h);
+
+                try {
+                  const midnight = getLocalMidnightTime(config.timezone);
+                  energyDebug.midnight = midnight;
+
+                  const energyLogs = await fetchAllReportLogs(env, config.powerDeviceId, config.energyCode, midnight, endTime, creds);
+                  energyDebug.energyLogsCount = energyLogs.length;
+
+                  if (energyLogs.length > 0) {
+                    const sumRaw = energyLogs.reduce((acc, l) => acc + (Number(l.value) || 0), 0);
+                    energyDebug.sumRaw = sumRaw;
+                    todayKwh = Number((sumRaw / 1000).toFixed(2));
+                    energyDebug.path = 'logs_sum_div_1000';
+                  }
+                } catch (eErr) {
+                  energyDebug.path = 'error: ' + (eErr.message || String(eErr));
+                }
+
+                if (todayKwh === 0 && eVal !== undefined) {
+                  todayKwh = scaleEnergyKwh(eVal);
+                  energyDebug.path = 'fallback_scaleEnergyKwh';
+                }
               }
 
               return {
@@ -656,6 +692,26 @@ export default {
             }
           })()
         ]);
+
+        // Store fresh histories for the next polls. Keep the previous good
+        // values when a refresh returns nothing (rate-limited) so the API
+        // never collapses to zeros.
+        if (!cacheFresh) {
+          const prev = historyCache;
+          historyCache = {
+            key: historyKey,
+            ts: Date.now(),
+            sensor1: sensor1 && sensor1.history && sensor1.history.length > 0
+              ? sensor1.history
+              : (prev ? prev.sensor1 : null),
+            sensor2: sensor2 && sensor2.history && sensor2.history.length > 0
+              ? sensor2.history
+              : (prev ? prev.sensor2 : null),
+            power: powerMeter && powerMeter.hourlyHistory && powerMeter.hourlyHistory.length > 0
+              ? { hourlyHistory: powerMeter.hourlyHistory, todayKwh: powerMeter.todayKwh, energyDebug: powerMeter.energyDebug }
+              : (prev ? prev.power : null)
+          };
+        }
 
         const sensors = [sensor1, sensor2].filter(Boolean);
 
