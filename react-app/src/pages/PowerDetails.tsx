@@ -137,6 +137,23 @@ export const PowerDetails: React.FC = () => {
     loadData();
   }, []);
 
+  // Periodic worker data refetch (30s): the worker caches the 24h histories
+  // for 5 min, so each poll only refreshes live status — and recovers the
+  // 24h charts when the initial load landed on a rate-limited refresh.
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const data = await fetchAllDeviceData();
+        setPowerData(data.power);
+        setSensors(data.sensors);
+      } catch (err) {
+        console.error("Error refreshing live data:", err);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Periodic real-time power meter stats sync (Catering to Local TV Box IP vs Tuya Cloud Fallback)
   useEffect(() => {
     if (!powerData || mode !== 'live') return;

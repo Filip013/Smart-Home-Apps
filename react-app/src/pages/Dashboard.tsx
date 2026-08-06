@@ -58,13 +58,12 @@ export const Dashboard: React.FC = () => {
     loadData();
   }, []);
 
-  // Periodic live data sync from Tuya API (every 30 seconds)
-  // Disabled when worker mode is on: /api/status is heavyweight (24h history) and
-  // was already fetched on initial load. Manual refresh via page reload is sufficient.
+  // Periodic live data sync (every 30 seconds). In worker mode this is now
+  // cheap: the worker caches the 24h histories for 5 min, so each poll only
+  // refetches live status — and a periodic refetch recovers the 24h charts
+  // when an initial load lands on a rate-limited refresh (Flutter already
+  // behaves this way via its 10s polling).
   useEffect(() => {
-    if (sensors.length === 0 && !powerData) return;
-    if (getWorkerModeEnabled()) return; // worker mode: no periodic full re-fetch
-
     const interval = setInterval(async () => {
       try {
         const data = await fetchAllDeviceData();
@@ -76,7 +75,7 @@ export const Dashboard: React.FC = () => {
     }, 30000); // Sync every 30 seconds
 
     return () => clearInterval(interval);
-  }, [sensors.length, powerData]);
+  }, []);
 
   // Periodic real-time power meter stats sync (Catering to Local TV Box IP vs Tuya Cloud Fallback)
   useEffect(() => {
