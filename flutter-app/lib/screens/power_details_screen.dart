@@ -129,43 +129,29 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                       ))
                   .fold(0.0, (a, b) => a + b);
 
+          // Monthly bar chart: this calendar month's real days only.
+          final barGroups30d = monthHistory.asMap().entries.map((e) {
+            final idx = e.key;
+            final kwh = (e.value['kwh'] as num?)?.toDouble() ?? 0.0;
+            return BarChartGroupData(
+              x: idx,
+              barRods: [
+                BarChartRodData(
+                  toY: kwh,
+                  color: const Color(0xFF3B82F6),
+                  width: 12,
+                  borderRadius: BorderRadius.circular(4),
+                )
+              ],
+            );
+          }).toList();
+
           final powerSpots = provider.power24hWave.asMap().entries.map((e) {
             return FlSpot(e.key.toDouble(), e.value);
           }).toList();
 
           final double minPowerY = (provider.power24hWave.reduce((a, b) => a < b ? a : b) - 20.0).clamp(0.0, 10000.0);
           final double maxPowerY = provider.power24hWave.reduce((a, b) => a > b ? a : b) + 20.0;
-
-          final barGroups30d = _firestoreEnergyHistory.isEmpty
-              ? List.generate(14, (i) {
-                  final kwh = (0.5 + (i % 5) * 0.15);
-                  return BarChartGroupData(
-                    x: i,
-                    barRods: [
-                      BarChartRodData(
-                        toY: kwh,
-                        color: const Color(0xFF3B82F6),
-                        width: 12,
-                        borderRadius: BorderRadius.circular(4),
-                      )
-                    ],
-                  );
-                })
-              : _firestoreEnergyHistory.asMap().entries.map((e) {
-                  final idx = e.key;
-                  final kwh = (e.value['kwh'] as num).toDouble();
-                  return BarChartGroupData(
-                    x: idx,
-                    barRods: [
-                      BarChartRodData(
-                        toY: kwh,
-                        color: const Color(0xFF3B82F6),
-                        width: 12,
-                        borderRadius: BorderRadius.circular(4),
-                      )
-                    ],
-                  );
-                }).toList();
 
           SensorDevice? dev1;
           SensorDevice? dev2;
@@ -368,7 +354,17 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                                   ],
                                 ),
                               )
-                            : BarChart(
+                            : (barGroups30d.isEmpty
+                                ? Center(
+                                    child: Text(
+                                      'No energy history recorded for $_selectedMonth yet.',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: isDark ? Colors.white54 : Colors.black54,
+                                      ),
+                                    ),
+                                  )
+                                : BarChart(
                                 BarChartData(
                                   gridData: const FlGridData(show: false),
                                   borderData: FlBorderData(show: false),
@@ -380,7 +376,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                                   ),
                                   barGroups: barGroups30d,
                                 ),
-                              ),
+                              )),
                       ),
                       const SizedBox(height: 16),
 
