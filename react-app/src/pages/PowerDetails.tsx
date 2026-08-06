@@ -303,9 +303,11 @@ export const PowerDetails: React.FC = () => {
       } catch (err) {
         console.error("Error in real-time power metrics synchronization loop:", err);
       } finally {
-        // Schedule next sync recursively only if active and tab is visible
+        // Schedule next sync recursively only if active and tab is visible.
+        // 5s cadence: 1s polling burned worker /proxy (and Tuya cloud) rate
+        // limits — ~86k requests/day vs ~17k at 5s.
         if (isActive && !document.hidden) {
-          timeoutId = setTimeout(runSync, 1000);
+          timeoutId = setTimeout(runSync, 5000);
         }
       }
     };
