@@ -106,9 +106,18 @@ class FirestoreService {
 
     try {
       final response = await http.get(url, headers: _authHeaders(idToken));
+      debugPrint('DIAG climateHistory: status=${response.statusCode} bodyLen=${response.body.length}');
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
         final documents = data['documents'] as List<dynamic>? ?? [];
+        if (documents.isEmpty) {
+          debugPrint('DIAG climateHistory: 200 but 0 documents (keys: ${data.keys.toList()})');
+        } else {
+          final first = (documents.first as Map<String, dynamic>?) ?? {};
+          debugPrint('DIAG climateHistory: first doc fields keys='
+              '${((first['fields'] as Map<String, dynamic>?) ?? {}).keys.toList()} '
+              'name=${first['name']}');
+        }
 
         return documents.map((doc) {
           final String name = doc['name'] ?? '';
