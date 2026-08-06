@@ -130,6 +130,57 @@ class FirestoreService {
     return null;
   }
 
+  /// Fetches the Tuya config doc the React app saves at
+  /// `users/{uid}/settings/tuya` — mirrors React's `getTuyaConfig()`.
+  /// Requires a Firebase ID token (Firestore rules are auth-gated).
+  static Future<Map<String, dynamic>?> fetchTuyaConfig({
+    String? userId,
+    String? idToken,
+  }) async {
+    final uid = userId?.trim() ?? '';
+    if (uid.isEmpty || idToken == null || idToken.isEmpty) return null;
+
+    final url = Uri.parse('$baseUrl/$uid/settings/tuya');
+    try {
+      final response = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer $idToken'},
+      );
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> doc = json.decode(response.body);
+        final fields = doc['fields'] as Map<String, dynamic>? ?? {};
+        return fields.map((k, v) => MapEntry(k, _unwrapField(v)));
+      }
+      debugPrint('Firestore fetchTuyaConfig HTTP ${response.statusCode}');
+    } catch (e) {
+      debugPrint('Firestore fetchTuyaConfig error: $e');
+    }
+    return null;
+  }
+
+  static dynamic _unwrapField(dynamic field) {
+    if (field is! Map<String, dynamic>) return null;
+    for (final k in const ['stringValue', 'integerValue', 'doubleValue', 'booleanValue']) {
+      if (field.containsKey(k)) {
+        final v = field[k];
+        if (k == 'integerValue' || k == 'doubleValue') return num.tryParse(v.toString());
+        if (k == 'booleanValue') return v == true || v == 'true';
+        return v?.toString();
+      }
+    }
+    if (field.containsKey('mapValue')) {
+      final inner = field['mapValue'] as Map<String, dynamic>?;
+      final innerFields = inner?['fields'] as Map<String, dynamic>? ?? {};
+      return innerFields.map((k, v) => MapEntry(k, _unwrapField(v)));
+    }
+    if (field.containsKey('arrayValue')) {
+      final inner = field['arrayValue'] as Map<String, dynamic>?;
+      final values = inner?['values'] as List<dynamic>? ?? [];
+      return values.map(_unwrapField).toList();
+    }
+    return null;
+  }
+
   static Future<String> _discoverUserUid() async {
     final rootUrl = Uri.parse(baseUrl);
     try {

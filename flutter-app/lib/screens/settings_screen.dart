@@ -30,6 +30,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _tvBoxUrlController;
   late TextEditingController _costController;
   late TextEditingController _firestoreUidController;
+  late TextEditingController _clientIdController;
+  late TextEditingController _clientSecretController;
+  late TextEditingController _regionController;
 
   @override
   void initState() {
@@ -48,6 +51,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _tvBoxUrlController = TextEditingController(text: widget.settingsService.tvBoxUrl);
     _costController = TextEditingController(text: widget.settingsService.costPerKwh.toString());
     _firestoreUidController = TextEditingController(text: widget.settingsService.firestoreUserId);
+    _clientIdController = TextEditingController(text: widget.settingsService.clientId);
+    _clientSecretController = TextEditingController(text: widget.settingsService.clientSecret);
+    _regionController = TextEditingController(text: widget.settingsService.region);
   }
 
   @override
@@ -66,6 +72,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _tvBoxUrlController.dispose();
     _costController.dispose();
     _firestoreUidController.dispose();
+    _clientIdController.dispose();
+    _clientSecretController.dispose();
+    _regionController.dispose();
     super.dispose();
   }
 
@@ -86,6 +95,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       tvBoxUrl: _tvBoxUrlController.text,
       costPerKwh: cost,
       firestoreUserId: _firestoreUidController.text,
+      clientId: _clientIdController.text,
+      clientSecret: _clientSecretController.text,
+      region: _regionController.text,
     );
 
     if (mounted) {
@@ -129,6 +141,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
               label: 'Authorization Bearer Token (AUTH_SECRET)',
               icon: LucideIcons.key,
               obscureText: true,
+              isDark: isDark,
+            ),
+            const SizedBox(height: 24),
+
+            _buildSectionHeader('Tuya Cloud Credentials (Tuya IoT Platform)'),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _clientIdController,
+              label: 'Client ID (Access ID / API Key)',
+              icon: LucideIcons.key_round,
+              isDark: isDark,
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _clientSecretController,
+              label: 'Client Secret (Access Secret)',
+              icon: LucideIcons.lock,
+              obscureText: true,
+              isDark: isDark,
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _regionController,
+              label: 'Region (us / eu / eu-west / cn / in)',
+              icon: LucideIcons.globe,
               isDark: isDark,
             ),
             const SizedBox(height: 24),

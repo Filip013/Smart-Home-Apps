@@ -16,6 +16,9 @@ class SettingsService {
   static const String _keyTvBoxUrl = 'tv_box_url';
   static const String _keyCostPerKwh = 'cost_per_kwh';
   static const String _keyFirestoreUserId = 'firestore_user_id';
+  static const String _keyClientId = 'tuya_client_id';
+  static const String _keyClientSecret = 'tuya_client_secret';
+  static const String _keyRegion = 'tuya_region';
 
   final SharedPreferences? _prefs;
 
@@ -30,9 +33,12 @@ class SettingsService {
   String _memPowerDeviceId = 'bfe14f4085de16419asyyf';
   String _memPowerDeviceName = 'Power Monitor';
   String _memPowerDeviceLoc = 'Belgrade';
-  String _memTvBoxUrl = 'http://filip013.duckdns.org:8080/live';
+  String _memTvBoxUrl = 'http://filip013.duckdns.org/live';
   double _memCostPerKwh = 0.15;
   String _memFirestoreUserId = '';
+  String _memClientId = '';
+  String _memClientSecret = '';
+  String _memRegion = 'eu';
 
   SettingsService(this._prefs);
 
@@ -60,6 +66,9 @@ class SettingsService {
   String get tvBoxUrl => _prefs?.getString(_keyTvBoxUrl) ?? _memTvBoxUrl;
   double get costPerKwh => _prefs?.getDouble(_keyCostPerKwh) ?? _memCostPerKwh;
   String get firestoreUserId => _prefs?.getString(_keyFirestoreUserId) ?? _memFirestoreUserId;
+  String get clientId => _prefs?.getString(_keyClientId) ?? _memClientId;
+  String get clientSecret => _prefs?.getString(_keyClientSecret) ?? _memClientSecret;
+  String get region => _prefs?.getString(_keyRegion) ?? _memRegion;
 
   Future<void> saveSettings({
     required String workerUrl,
@@ -76,6 +85,9 @@ class SettingsService {
     required String tvBoxUrl,
     required double costPerKwh,
     required String firestoreUserId,
+    required String clientId,
+    required String clientSecret,
+    required String region,
   }) async {
     _memWorkerUrl = workerUrl.trim();
     _memAuthToken = authToken.trim();
@@ -91,6 +103,9 @@ class SettingsService {
     _memTvBoxUrl = tvBoxUrl.trim();
     _memCostPerKwh = costPerKwh;
     _memFirestoreUserId = firestoreUserId.trim();
+    _memClientId = clientId.trim();
+    _memClientSecret = clientSecret.trim();
+    _memRegion = region.trim().isEmpty ? 'eu' : region.trim();
 
     final prefs = _prefs;
     if (prefs != null) {
@@ -109,6 +124,9 @@ class SettingsService {
         await prefs.setString(_keyTvBoxUrl, _memTvBoxUrl);
         await prefs.setDouble(_keyCostPerKwh, _memCostPerKwh);
         await prefs.setString(_keyFirestoreUserId, _memFirestoreUserId);
+        await prefs.setString(_keyClientId, _memClientId);
+        await prefs.setString(_keyClientSecret, _memClientSecret);
+        await prefs.setString(_keyRegion, _memRegion);
       } catch (e) {
         debugPrint('Failed to save to SharedPreferences: $e');
       }

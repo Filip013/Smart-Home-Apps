@@ -102,4 +102,17 @@ class AuthService extends ChangeNotifier {
       debugPrint('Sign Out Error: $e');
     }
   }
+
+  /// Firebase ID token for authenticated Firestore REST reads
+  /// (mirrors React's signed-in config fetch).
+  Future<String?> getIdToken() async {
+    final user = _currentUser ?? _auth?.currentUser;
+    if (user == null) return null;
+    try {
+      return await user.getIdToken();
+    } catch (e) {
+      debugPrint('getIdToken Error: $e');
+      return null;
+    }
+  }
 }

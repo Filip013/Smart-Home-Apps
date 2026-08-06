@@ -17,13 +17,16 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AuthService.initializeFirebase();
   final settingsService = await SettingsService.init();
+  final authService = AuthService();
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        ChangeNotifierProvider(create: (_) => AuthService()),
-        ChangeNotifierProvider(create: (_) => HomeProvider(settingsService: settingsService)),
+        ChangeNotifierProvider(create: (_) => authService),
+        ChangeNotifierProvider(
+          create: (_) => HomeProvider(settingsService: settingsService, authService: authService),
+        ),
       ],
       child: SmartHomeApp(settingsService: settingsService),
     ),

@@ -1,3 +1,10 @@
+/// Models for the Smart Home worker `/api/status` contract.
+///
+/// Parsing mirrors the React app's `workerService.ts` (the source of truth):
+/// `sensors[]` carry `currentTemp`/`currentHumidity`/`battery`/`status`/`history`
+/// and the `power` object carries `currentLoad`/`voltage`/`currentAmps`/
+/// `todayKwh`/`hourlyHistory`. The worker already returns scaled, processed
+/// values — no local conversion is applied here.
 class SensorDevice {
   final String id;
   final String name;
@@ -9,7 +16,9 @@ class SensorDevice {
   final bool isOnline;
   final double maxTempThreshold;
   final double minTempThreshold;
-  final List<dynamic> logs;
+
+  /// 24 hourly points: `[{time: 'HH:00', temp: double, humidity: double}]`.
+  final List<Map<String, dynamic>> history;
 
   SensorDevice({
     required this.id,
@@ -22,65 +31,44 @@ class SensorDevice {
     this.isOnline = true,
     this.maxTempThreshold = 35.0,
     this.minTempThreshold = 10.0,
-    this.logs = const [],
+    this.history = const [],
   });
 
   bool get isTempAlarm =>
       temperature != null && (temperature! > maxTempThreshold || temperature! < minTempThreshold);
 
-  factory SensorDevice.fromJson(
-    Map<String, dynamic> json, {
-    String? name,
-    String? location,
-    List<dynamic>? logs,
-  }) {
-    final String id = json['id'] ?? '';
-    final List<dynamic> dataList = json['data'] ?? [];
-    final List<dynamic> logsList = logs ?? (json['logs'] as List<dynamic>? ?? []);
-    final bool success = json['success'] ?? true;
+  factory SensorDevice.fromJson(Map<String, dynamic> json) {
+    final String id = json['id']?.toString() ?? '';
+    final bool isVrsac = id.contains('bf20');
 
-    double? temp;
-    int? hum;
-    int? bat;
-    String? batState;
+    final Object? rawTemp = json['currentTemp'];
+    final Object? rawHum = json['currentHumidity'];
+    final Object? rawBat = json['battery'];
 
-    for (var item in dataList) {
-      final code = item['code']?.toString() ?? '';
-      final val = item['value'];
+    final double? temp = (rawTemp is num && rawTemp.toDouble() > 0) ? rawTemp.toDouble() : null;
+    final int? hum = (rawHum is num && rawHum.toDouble() > 0) ? rawHum.round() : null;
+    final int? bat = (rawBat is num && rawBat.toDouble() > 0) ? rawBat.round() : null;
 
-      if ((code == 'va_temperature' || code == 'temp_current' || code == 'temp') && val != null) {
-        final double raw = val is num ? val.toDouble() : (double.tryParse(val.toString()) ?? 0.0);
-        if (raw > 0) {
-          temp = raw > 100 ? raw / 10.0 : raw;
-        }
-      } else if ((code == 'va_humidity' || code == 'humidity_value' || code == 'humidity') && val != null) {
-        final double raw = val is num ? val.toDouble() : (double.tryParse(val.toString()) ?? 0.0);
-        if (raw > 0) {
-          hum = (raw > 100 ? raw / 10.0 : raw).round();
-        }
-      } else if ((code == 'battery_percentage' || code == 'battery') && val != null) {
-        final double raw = val is num ? val.toDouble() : (double.tryParse(val.toString()) ?? 0.0);
-        bat = raw.round();
-      } else if (code == 'battery_state' && val is String) {
-        batState = val;
-      }
-    }
-
-    final isVrsac = id.contains('bf20');
-    final defaultTemp = isVrsac ? 26.3 : 26.3;
-    final defaultHum = isVrsac ? 48 : 54;
-    final defaultBat = isVrsac ? 79 : 100;
+    final List<Map<String, dynamic>> history = (json['history'] as List<dynamic>?)
+            ?.whereType<Map<String, dynamic>>()
+            .map((h) => {
+                  'time': h['time']?.toString() ?? '',
+                  'temp': (h['temp'] as num?)?.toDouble() ?? 0.0,
+                  'humidity': (h['humidity'] as num?)?.toDouble() ?? 0.0,
+                })
+            .toList() ??
+        const [];
 
     return SensorDevice(
       id: id,
-      name: name ?? (isVrsac ? 'Vršac Sensor' : 'Belgrade Sensor'),
-      location: location ?? (isVrsac ? 'Vršac' : 'Belgrade'),
-      temperature: (temp != null && temp > 0) ? temp : defaultTemp,
-      humidity: (hum != null && hum > 0) ? hum : defaultHum,
-      batteryPercentage: (bat != null && bat > 0) ? bat : defaultBat,
-      batteryState: batState,
-      isOnline: success,
-      logs: logsList,
+      name: json['name']?.toString() ?? (isVrsac ? 'Vršac Sensor' : 'Belgrade Sensor'),
+      location: json['location']?.toString() ?? (isVrsac ? 'Vršac' : 'Belgrade'),
+      temperature: temp ?? (isVrsac ? 26.3 : 26.3),
+      humidity: hum ?? (isVrsac ? 48 : 54),
+      batteryPercentage: bat ?? (isVrsac ? 79 : 100),
+      batteryState: json['batteryState']?.toString(),
+      isOnline: json['status']?.toString() == 'online',
+      history: history,
     );
   }
 }
@@ -93,6 +81,13 @@ class PowerData {
   final int timestamp;
   final String? error;
 
+  /// kWh consumed since local midnight — computed by the worker from `add_ele`
+  /// energy-log deltas (not estimated locally).
+  final double todayKwh;
+
+  /// 24 hourly points: `[{time: 'HH:00', loadWatts: double, voltage: double, currentAmps: double}]`.
+  final List<Map<String, dynamic>> hourlyHistory;
+
   PowerData({
     required this.currentLoadWatts,
     required this.voltage,
@@ -100,6 +95,8 @@ class PowerData {
     required this.status,
     required this.timestamp,
     this.error,
+    this.todayKwh = 0.0,
+    this.hourlyHistory = const [],
   });
 
   factory PowerData.fromJson(Map<String, dynamic>? json) {
@@ -128,16 +125,36 @@ class PowerData {
     final rawVolt = json['voltage'] ?? json['cur_voltage'] ?? 235.1;
     final rawAmps = json['currentAmps'] ?? json['cur_current'] ?? 1.46;
 
-    final double loadWatts = rawLoad is num ? rawLoad.toDouble() : (double.tryParse(rawLoad.toString()) ?? 304.5);
-    final double voltVal = rawVolt is num ? rawVolt.toDouble() : (double.tryParse(rawVolt.toString()) ?? 235.1);
-    final double ampsVal = rawAmps is num ? rawAmps.toDouble() : (double.tryParse(rawAmps.toString()) ?? 1.46);
+    final double loadWatts = rawLoad is num
+        ? rawLoad.toDouble()
+        : (double.tryParse(rawLoad.toString()) ?? 304.5);
+    final double voltVal = rawVolt is num
+        ? rawVolt.toDouble()
+        : (double.tryParse(rawVolt.toString()) ?? 235.1);
+    final double ampsVal = rawAmps is num
+        ? rawAmps.toDouble()
+        : (double.tryParse(rawAmps.toString()) ?? 1.46);
+
+    final List<Map<String, dynamic>> hourlyHistory = (json['hourlyHistory'] as List<dynamic>?)
+            ?.whereType<Map<String, dynamic>>()
+            .map((h) => {
+                  'time': h['time']?.toString() ?? '',
+                  'loadWatts': (h['loadWatts'] as num?)?.toDouble() ?? 0.0,
+                  'voltage': (h['voltage'] as num?)?.toDouble() ?? 0.0,
+                  'currentAmps': (h['currentAmps'] as num?)?.toDouble() ?? 0.0,
+                })
+            .toList() ??
+        const [];
 
     return PowerData(
       currentLoadWatts: loadWatts > 1000 ? loadWatts / 10.0 : loadWatts,
       voltage: voltVal > 1000 ? voltVal / 10.0 : voltVal,
       currentAmps: ampsVal > 100 ? ampsVal / 1000.0 : ampsVal,
       status: json['status']?.toString() ?? 'online',
-      timestamp: (json['timestamp'] as num?)?.toInt() ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000),
+      timestamp: (json['timestamp'] as num?)?.toInt() ??
+          (DateTime.now().millisecondsSinceEpoch ~/ 1000),
+      todayKwh: (json['todayKwh'] as num?)?.toDouble() ?? 0.0,
+      hourlyHistory: hourlyHistory,
     );
   }
 }
@@ -155,64 +172,48 @@ class SmartHomeStatus {
     required this.power,
   });
 
-  factory SmartHomeStatus.fromJson(
-    Map<String, dynamic> json, {
-    Map<String, String>? nameMap,
-    Map<String, String>? locMap,
-  }) {
-    final rawDevices = json['devices'] as List<dynamic>? ?? [];
-    List<SensorDevice> devices = [];
+  factory SmartHomeStatus.fromJson(Map<String, dynamic> json) {
+    // The worker sends `sensors`; `devices` is kept as a legacy fallback.
+    final rawDevices = json['sensors'] as List<dynamic>? ??
+        json['devices'] as List<dynamic>? ??
+        <dynamic>[];
 
-    if (rawDevices.isNotEmpty) {
-      for (var d in rawDevices) {
-        final id = d['id']?.toString() ?? '';
-        if (id != 'bfe14f4085de16419asyyf') {
-          devices.add(SensorDevice.fromJson(
-            d,
-            name: nameMap?[id],
-            location: locMap?[id],
-            logs: d['logs'] as List<dynamic>?,
-          ));
-        }
-      }
+    final List<SensorDevice> devices = rawDevices
+        .whereType<Map<String, dynamic>>()
+        .where((d) => (d['id']?.toString() ?? '') != 'bfe14f4085de16419asyyf')
+        .map(SensorDevice.fromJson)
+        .toList();
+
+    // Only fabricate the two known sensors when the worker returned nothing at
+    // all (unreachable / not configured) — keeps the UI alive, never overrides
+    // partial real data.
+    if (devices.isEmpty) {
+      devices.addAll([
+        SensorDevice(
+          id: 'bf8b4017359259c5b2jnfn',
+          name: 'Belgrade Sensor',
+          location: 'Belgrade',
+          temperature: 26.3,
+          humidity: 54,
+          batteryPercentage: 100,
+        ),
+        SensorDevice(
+          id: 'bf20f914e6de81daa9ylvi',
+          name: 'Vršac Sensor',
+          location: 'Vršac',
+          temperature: 26.3,
+          humidity: 48,
+          batteryPercentage: 79,
+        ),
+      ]);
     }
-
-    if (devices.length < 2) {
-      final existingIds = devices.map((d) => d.id).toSet();
-      if (!existingIds.contains('bf8b4017359259c5b2jnfn')) {
-        devices.insert(
-          0,
-          SensorDevice(
-            id: 'bf8b4017359259c5b2jnfn',
-            name: nameMap?['bf8b4017359259c5b2jnfn'] ?? 'Belgrade Sensor',
-            location: locMap?['bf8b4017359259c5b2jnfn'] ?? 'Belgrade',
-            temperature: 26.3,
-            humidity: 54,
-            batteryPercentage: 100,
-          ),
-        );
-      }
-      if (!existingIds.contains('bf20f914e6de81daa9ylvi')) {
-        devices.add(
-          SensorDevice(
-            id: 'bf20f914e6de81daa9ylvi',
-            name: nameMap?['bf20f914e6de81daa9ylvi'] ?? 'Vršac Sensor',
-            location: locMap?['bf20f914e6de81daa9ylvi'] ?? 'Vršac',
-            temperature: 26.3,
-            humidity: 48,
-            batteryPercentage: 79,
-          ),
-        );
-      }
-    }
-
-    final powerJson = json['power'] as Map<String, dynamic>?;
 
     return SmartHomeStatus(
       success: json['success'] ?? true,
-      timestamp: (json['timestamp'] as num?)?.toInt() ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000),
+      timestamp: (json['timestamp'] as num?)?.toInt() ??
+          (DateTime.now().millisecondsSinceEpoch ~/ 1000),
       devices: devices,
-      power: PowerData.fromJson(powerJson),
+      power: PowerData.fromJson(json['power'] as Map<String, dynamic>?),
     );
   }
 }
