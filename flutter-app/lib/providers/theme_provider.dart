@@ -1,13 +1,46 @@
 import 'package:flutter/material.dart';
 
 class ThemeProvider extends ChangeNotifier {
-  ThemeMode _themeMode = ThemeMode.dark;
+  /// Follows the system by default. The manual toggle sets an explicit
+  /// light/dark override that lasts until the system brightness changes,
+  /// then we follow the system again.
+  ThemeMode _themeMode = ThemeMode.system;
 
   ThemeMode get themeMode => _themeMode;
-  bool get isDarkMode => _themeMode == ThemeMode.dark;
+
+  /// Resolved brightness: manual override wins, otherwise the system.
+  bool get isDarkMode {
+    switch (_themeMode) {
+      case ThemeMode.dark:
+        return true;
+      case ThemeMode.light:
+        return false;
+      case ThemeMode.system:
+        return WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark;
+    }
+  }
+
+  ThemeProvider() {
+    WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged =
+        _onSystemBrightnessChanged;
+  }
+
+  void _onSystemBrightnessChanged() {
+    // Clear any manual override when the system theme changes.
+    if (_themeMode != ThemeMode.system) {
+      _themeMode = ThemeMode.system;
+      notifyListeners();
+    }
+  }
 
   void toggleTheme() {
-    _themeMode = _themeMode == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    _themeMode = isDarkMode ? ThemeMode.light : ThemeMode.dark;
+    notifyListeners();
+  }
+
+  void setThemeMode(ThemeMode mode) {
+    _themeMode = mode;
     notifyListeners();
   }
 

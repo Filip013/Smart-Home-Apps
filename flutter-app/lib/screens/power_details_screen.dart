@@ -97,6 +97,16 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
           final double monthlyKwh = sumMonthlyKwh(monthHistory);
           final double monthlyCostRsd = sumMonthlyCostRsd(monthHistory);
 
+          // Real peaks — mirror React's peakLoad24h (max of today's hourly
+          // history, W) and selectedMonthPeakKw (max of this month's
+          // energyHistory peakKw). Never the current load.
+          final double hourlyPeakW = (power?.hourlyHistory ?? const [])
+              .map((h) => (h['loadWatts'] as num?)?.toDouble() ?? 0.0)
+              .fold<double>(0.0, (m, w) => w > m ? w : m);
+          final double monthPeakKw = monthHistory
+              .map((e) => (e['peakKw'] as num?)?.toDouble() ?? 0.0)
+              .fold<double>(0.0, (m, p) => p > m ? p : m);
+
           // Monthly bar chart: this calendar month's real days only.
           final barGroups30d = monthHistory.asMap().entries.map((e) {
             final idx = e.key;
@@ -204,7 +214,9 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                     Expanded(
                       child: _buildKpiCard(
                         title: _timeRange == '24h' ? 'Today\'s Peak Load' : 'Peak Power (Month)',
-                        value: _timeRange == '24h' ? '${(watts * 1.02).toStringAsFixed(0)} W' : '${(provider.peakDemandKw).toStringAsFixed(2)} kW',
+                        value: _timeRange == '24h'
+                            ? '${hourlyPeakW.toStringAsFixed(0)} W'
+                            : '${monthPeakKw.toStringAsFixed(2)} kW',
                         footer: _timeRange == '24h' ? 'Peak load recorded today' : 'Highest demand in month',
                         icon: LucideIcons.zap,
                         color: const Color(0xFF00E5FF),
@@ -358,7 +370,7 @@ class _PowerDetailsScreenState extends State<PowerDetailsScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
-                            _buildSummaryStatItem('Peak Demand', '${(watts / 1000.0).toStringAsFixed(2)} kW', Colors.redAccent),
+                            _buildSummaryStatItem('Peak Demand', _timeRange == '24h' ? '${(hourlyPeakW / 1000.0).toStringAsFixed(2)} kW' : '${monthPeakKw.toStringAsFixed(2)} kW', Colors.redAccent),
                             _buildSummaryStatItem('Average Load', '${watts.toStringAsFixed(0)} W', isDark ? Colors.white : Colors.black),
                             _buildSummaryStatItem('Estimated Cost', _timeRange == '24h' ? '${todayCostRsd.toStringAsFixed(1)} RSD' : (monthlyCostRsd > 0 ? '${monthlyCostRsd.toStringAsFixed(1)} RSD' : '—'), Colors.amberAccent),
                           ],

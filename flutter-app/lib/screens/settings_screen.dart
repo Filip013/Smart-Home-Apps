@@ -122,6 +122,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
 
+            _buildSectionHeader('Appearance'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+              ),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.moon_star, color: const Color(0xFF6366F1)),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Dark Mode',
+                          style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Override the system theme. Resets to follow the system when your device theme changes.',
+                          style: GoogleFonts.inter(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: isDark,
+                    onChanged: (_) =>
+                        Provider.of<ThemeProvider>(context, listen: false).toggleTheme(),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
             _buildSectionHeader('Cloudflare Worker Gateway (BFF)'),
             const SizedBox(height: 12),
             _buildTextField(
