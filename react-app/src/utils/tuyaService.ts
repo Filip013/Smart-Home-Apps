@@ -114,12 +114,16 @@ export const signInWithGoogle = async (): Promise<User | null> => {
   if (isTauri()) {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      // In development, use local dev server. In production, use window.location.origin or Vercel URL
-      const baseUrl = import.meta.env.DEV 
-        ? "http://localhost:5173" 
-        : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
-            ? window.location.origin
-            : "https://aether-smart.vercel.app");
+      // Android: always use Vercel — localhost:5173 is the PC dev server, unreachable from the phone.
+      // Desktop: unchanged (localhost dev server / window.location.origin / Vercel).
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const baseUrl = isAndroid
+        ? "https://aether-smart.vercel.app"
+        : (import.meta.env.DEV 
+            ? "http://localhost:5173" 
+            : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
+                ? window.location.origin
+                : "https://aether-smart.vercel.app"));
       const authProxyUrl = `${baseUrl}/#/desktop-auth?source=tauri`;
 
       // 1. Start the local server in Rust to listen for token
