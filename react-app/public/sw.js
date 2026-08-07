@@ -1,4 +1,5 @@
-const CACHE_NAME = 'aethersmart-cache-v1';
+// Versioned cache — bump on deploy to purge stale bundles (e.g. auth fixes).
+const CACHE_NAME = 'aethersmart-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   'index.html',
@@ -32,7 +33,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch Event: network-first or cache-fallback for assets, bypass external requests
+// Fetch Event
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
@@ -40,18 +41,35 @@ self.addEventListener('fetch', (event) => {
 
   // Bypass Tuya API Proxies & Firebase SDK requests
   if (
-    url.pathname.startsWith('/tuya-') || 
-    url.hostname.includes('firebase') || 
+    url.pathname.startsWith('/tuya-') ||
+    url.hostname.includes('firebase') ||
     url.hostname.includes('googleapis') ||
     url.hostname.includes('firestore')
   ) {
     return;
   }
 
+  // Navigation / HTML: network-first so a new deploy (e.g. auth fix) is picked
+  // up immediately instead of serving a stale cached index.html + old bundles.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Hashed assets: stale-while-revalidate (fast offline, safe because filenames are content-hashed)
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Fetch fresh copy in the background to update cache (Stale-While-Revalidate)
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => {
@@ -59,7 +77,7 @@ self.addEventListener('fetch', (event) => {
             });
           }
         }).catch(() => {/* Ignore background sync failures */});
-        
+
         return cachedResponse;
       }
 
