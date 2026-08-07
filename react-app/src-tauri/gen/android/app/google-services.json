@@ -36,6 +36,35 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:115950049911:android:3184c5f57b274d82c78472",
+        "android_client_info": {
+          "package_name": "com.aethersmart.app.debug"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "115950049911-lgnk07grs7avnq8tc37dcpr6i9c0clq2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCcf-cOh8MYQ-nxjklut5L988LPVIJD-dg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "115950049911-lgnk07grs7avnq8tc37dcpr6i9c0clq2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:115950049911:android:5e7486817367da6ec78472",
         "android_client_info": {
           "package_name": "com.lingocraft.lingocraft_flutter"
