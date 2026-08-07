@@ -424,6 +424,31 @@ body {
   color: var(--color-text-muted);
 }
 
+.hero-welcome-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.badge-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Mobile only: keep "Welcome Back" on its own row so Worker + Live stay together on row 2 */
+@media (max-width: 640px) {
+  .hero-welcome-top h2 {
+    flex-basis: 100%;
+  }
+  .hero-welcome-top {
+    gap: 8px;
+  }
+}
+
 .hero-stats {
   display: flex;
   align-items: center;

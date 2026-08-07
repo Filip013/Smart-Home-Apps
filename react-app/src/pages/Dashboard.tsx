@@ -398,8 +398,9 @@ export const Dashboard: React.FC = () => {
       {/* Overview Banner / Hero section */}
       <section className="overview-hero glass" aria-label="System Quick Summary">
         <div className="hero-welcome">
-            <h2 style={{ margin: 0 }}>Welcome Back</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '8px', marginBottom: '8px' }}>
+            <div className="hero-welcome-top" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
+              <h2 style={{ margin: 0 }}>Welcome Back</h2>
+              <div className="badge-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {/* Data source badge — reflects how the history/sensor data was loaded */}
               <div
                 id="data-source-badge"
@@ -444,6 +445,7 @@ export const Dashboard: React.FC = () => {
                 <span>
                   {connStatus.status === 'local' ? 'Live (LAN)' : connStatus.status === 'proxy' ? 'Live (Proxy)' : connStatus.status === 'cloud' ? 'Cloud Sync' : `Local Server Connection Failed: ${connStatus.detail}`}
                 </span>
+              </div>
               </div>
             </div>
           <p style={{ margin: 0 }}>Here is what's happening in your connected home today.</p>
