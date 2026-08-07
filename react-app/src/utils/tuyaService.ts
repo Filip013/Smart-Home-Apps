@@ -1,4 +1,6 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import { getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { 
   initializeAuth,
@@ -104,17 +106,20 @@ const firebaseConfig = {
   measurementId: "G-GWRHMX8RE5"
 };
 
-// Initialize Firebase — use modular auth with explicit persistence
-// to avoid cross-origin iframe bug in WebKitGTK (Linux) / Android WebView.
-// See Language-Learning-React-Apps/src/firebase.js for the proven pattern.
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
+// Initialize Firebase — exact LingoHub pattern (compat init + modular Auth)
+// to avoid cross-origin iframe bug in WebKitGTK / Android WebView.
+// See Language-Learning-React-Apps/src/firebase.js:16-25
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+const modularApp = getApp();
+export const db = getFirestore(modularApp);
 let _auth: import('firebase/auth').Auth;
 try {
-  _auth = initializeAuth(app, { persistence: browserLocalPersistence });
+  _auth = initializeAuth(modularApp, { persistence: browserLocalPersistence });
 } catch {
   // already initialized (HMR) — fall back
-  _auth = getAuth(app);
+  _auth = getAuth(modularApp);
 }
 export const auth = _auth;
 export const googleProvider = new GoogleAuthProvider();
