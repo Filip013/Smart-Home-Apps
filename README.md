@@ -1,14 +1,12 @@
 # AetherSmart — Smart Home Apps (monorepo)
 
-Monorepo for the AetherSmart smart-home suite: a React + Tauri web/desktop app, a
-Flutter mobile app, and the supporting backend/daemon services.
+Monorepo for the AetherSmart smart-home suite: a React + Tauri web/desktop app and supporting backend/daemon services. (The Flutter mobile app experiment is preserved on the [`flutter`](../../tree/flutter) branch).
 
 ## Layout
 
 | Path               | What it is                                                                 |
 | ------------------ | -------------------------------------------------------------------------- |
 | `react-app/`       | Web app (React + TypeScript + Vite) and Tauri v2 desktop shell (`AetherSmart`) |
-| `flutter-app/`     | Mobile app (Flutter, `smart_home_flutter`)                                 |
 | `cloudflare-proxy/`| Cloudflare Worker BFF (`worker.js`) — Tuya auth, status aggregation, control, CORS proxy |
 | `tuya-realtime/`   | Local Tuya real-time power monitor daemon (`daemon.py`, runs on a TV Box / Termux / home server) |
 | `scripts/`         | Utility scripts (e.g. `record_history.py`, run daily via GitHub Actions)   |
@@ -29,17 +27,9 @@ npm run tauri dev  # Tauri desktop shell
 Deployed to Vercel (root `vercel.json` points the build at `react-app/`) and
 distributed as a Tauri desktop app (`src-tauri/`).
 
-### flutter-app (mobile)
+### flutter-app (mobile - `flutter` branch)
 
-```bash
-cd flutter-app
-flutter pub get
-flutter run          # default device
-flutter build apk    # Android release
-```
-
-Firebase auth (Google Sign-In), live Tuya power/energy dashboard, wear-OS
-summary, export reports.
+The Flutter mobile application code is maintained on the [`flutter`](../../tree/flutter) branch. Switch to that branch (`git checkout flutter`) to access `flutter-app/`.
 
 ## Backend / services
 
