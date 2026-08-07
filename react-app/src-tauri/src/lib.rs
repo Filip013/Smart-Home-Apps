@@ -38,31 +38,11 @@ async fn start_auth_server() -> Result<String, String> {
     }).await.map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-async fn google_sign_in<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
-    // Native Android Google Sign-In via Credential Manager
-    // Stub for now — Vercel manual paste fallback is used until native is fully wired.
-    // The Kotlin helper com.aethersmart.app.GoogleAuthHelper is already in place
-    // (gen/android/app/src/main/java/.../GoogleAuthHelper.kt) and dependencies added to
-    // gen/android/app/build.gradle.kts (play-services-auth, credentials). Next step is
-    // to wire JNI via app.run_on_android_context. For now, return error to trigger Vercel fallback.
-    #[cfg(target_os = "android")]
-    {
-        let _ = app;
-        Err("native Google Sign-In not yet wired — use Vercel manual token paste".into())
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = app;
-        Err("google_sign_in only available on Android".into())
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
-    .invoke_handler(tauri::generate_handler![start_auth_server, google_sign_in])
+    .invoke_handler(tauri::generate_handler![start_auth_server])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

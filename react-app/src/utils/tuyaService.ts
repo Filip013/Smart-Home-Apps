@@ -1,12 +1,7 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
-import { getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { 
-  initializeAuth,
-  browserLocalPersistence,
-  browserPopupRedirectResolver,
-  getAuth,
+  getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
   signInWithCredential,
@@ -106,66 +101,29 @@ const firebaseConfig = {
   measurementId: "G-GWRHMX8RE5"
 };
 
-// Initialize Firebase — exact LingoHub pattern (compat init + modular Auth)
-// to avoid cross-origin iframe bug in WebKitGTK / Android WebView.
-// See Language-Learning-React-Apps/src/firebase.js:16-25
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const modularApp = getApp();
-export const db = getFirestore(modularApp);
-let _auth: import('firebase/auth').Auth;
-try {
-  _auth = initializeAuth(modularApp, { persistence: browserLocalPersistence });
-} catch {
-  // already initialized (HMR) — fall back
-  _auth = getAuth(modularApp);
-}
-export const auth = _auth;
+// Initialize Firebase
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const db = getFirestore(app);
+export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-
-// Prevent parallel start_auth_server binds (AddrInUse) when user double-taps login
-let pendingAuthServer: Promise<string> | null = null;
 
 // Google Auth Handlers
 export const signInWithGoogle = async (): Promise<User | null> => {
   googleProvider.setCustomParameters({ prompt: 'select_account' });
   
   if (isTauri()) {
-    // Android native: try Credential Manager / GoogleSignIn first (no Vercel, uses google-services.json)
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    if (isAndroid) {
-      try {
-        const idToken = await invoke<string>('google_sign_in');
-        if (idToken) {
-          const credential = GoogleAuthProvider.credential(idToken.trim());
-          const result = await signInWithCredential(auth, credential);
-          return result.user;
-        }
-      } catch (nativeErr) {
-        console.warn("Native Google Sign-In failed, falling back to Vercel bridge:", nativeErr);
-        // fall through to Vercel loopback
-      }
-    }
-
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      // LingoHub pattern: always use Vercel for Tauri (desktop + Android fallback).
-      // localhost:5173 is not reachable from phone, and tauri://localhost is not
-      // Firebase-authorized. Vercel is reachable and whitelisted.
-      // See Language-Learning/src/pages/Home.jsx:139 for inspiration.
-      const authProxyUrl = "https://aether-smart.vercel.app/#/desktop-auth?source=tauri";
+      // In development, use local dev server. In production, use window.location.origin or Vercel URL
+      const baseUrl = import.meta.env.DEV 
+        ? "http://localhost:5173" 
+        : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
+            ? window.location.origin
+            : "https://aether-smart.vercel.app");
+      const authProxyUrl = `${baseUrl}/#/desktop-auth?source=tauri`;
 
-      // 1. Start the local server in Rust to listen for token (reuse pending if already listening)
-      if (!pendingAuthServer) {
-        pendingAuthServer = invoke<string>('start_auth_server').finally(() => {
-          // clear after resolve/reject so next login can bind fresh
-          setTimeout(() => { pendingAuthServer = null; }, 1000);
-        });
-        // swallow AddrInUse background error until awaited
-        pendingAuthServer.catch(() => {});
-      }
-      const tokenPromise = pendingAuthServer;
+      // 1. Start the local server in Rust to listen for token
+      const tokenPromise = invoke<string>('start_auth_server');
 
       // 2. Open default browser (fall back to window.open if plugin-opener fails)
       openUrl(authProxyUrl).catch((err: any) => {
@@ -188,7 +146,7 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       throw err;
     }
   } else {
-    const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
+    const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   }
 };

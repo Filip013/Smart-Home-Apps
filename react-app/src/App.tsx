@@ -6,8 +6,6 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Zap } from 'lucide-react';
 import { DeviceDataProvider } from './context/DeviceDataContext';
-import { isTauri, invoke } from '@tauri-apps/api/core';
-import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 import './index.css';
 
 // F: Lazy-load heavy pages — they're not needed on the initial render, so
@@ -24,7 +22,7 @@ const PageFallback = () => (
   </div>
 );
 
-function MainApp({ user, authError, handleLogin, showAuthModal, pastedToken, setPastedToken, handleSubmitPastedToken, setShowAuthModal, authLoading }: { user: User | null; authError: string; handleLogin: () => void; showAuthModal: boolean; pastedToken: string; setPastedToken: (v: string) => void; handleSubmitPastedToken: () => void; setShowAuthModal: (v: boolean) => void; authLoading: boolean }) {
+function MainApp({ user, authError, handleLogin }: { user: User | null; authError: string; handleLogin: () => void }) {
   if (!user) {
     return (
       <div 
@@ -127,23 +125,6 @@ function MainApp({ user, authError, handleLogin, showAuthModal, pastedToken, set
             </div>
           )}
         </div>
-        {showAuthModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', zIndex: 50 }} onClick={() => setShowAuthModal(false)}>
-            <div className="glass" style={{ width: '100%', maxWidth: '420px', padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '16px', border: '1px solid rgba(255,255,255,0.1)' }} onClick={e => e.stopPropagation()}>
-              <h3 style={{ margin: 0, fontWeight: 700, color: 'var(--color-text)' }}>Paste Auth Token</h3>
-              <p style={{ margin: 0, fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
-                Vercel opened in system browser. After signing in there, copy the token and paste here. (Fallback for Android where loopback is blocked)
-              </p>
-              <textarea value={pastedToken} onChange={e => setPastedToken(e.target.value)} placeholder="Paste Google ID token..." style={{ width: '100%', height: '80px', fontSize: '11px', fontFamily: 'monospace', padding: '8px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'var(--color-text)', resize: 'none' }} />
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setShowAuthModal(false)} className="btn secondary" style={{ flex: 1, justifyContent: 'center' }}>Cancel</button>
-                <button onClick={handleSubmitPastedToken} disabled={!pastedToken.trim() || authLoading} className="btn primary" style={{ flex: 1, justifyContent: 'center', opacity: !pastedToken.trim() || authLoading ? 0.6 : 1 }}>
-                  {authLoading ? 'Signing in...' : 'Sign In'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -172,18 +153,12 @@ function App() {
   const [user, setUser] = useState<User | null>(auth.currentUser);
   const [loading, setLoading] = useState(!auth.currentUser); // skip spinner if cached
   const [authError, setAuthError] = useState('');
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [pastedToken, setPastedToken] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
-    // Web only: check redirect flow. Skip on Tauri (Android/desktop) where
-    // tauri://localhost triggers auth/argument-error in WebView (see logcat).
-    if (!isTauri()) {
-      getRedirectResult(auth).catch((err) => {
-        console.warn("Redirect sign-in error:", err);
-      });
-    }
+    // Check if coming back from a redirect sign-in flow
+    getRedirectResult(auth).catch((err) => {
+      console.warn("Redirect sign-in error:", err);
+    });
 
     // Listen to Firebase Auth state shifts
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -194,39 +169,6 @@ function App() {
   }, []);
 
   const handleLogin = async () => {
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    // Android Tauri: native first, then Vercel with manual paste fallback (no loopback block)
-    if (isTauri() && isAndroid) {
-      setAuthError('');
-      setShowAuthModal(true);
-      setPastedToken('');
-      // Try native in background (uses google-services.json, no Vercel)
-      invoke<string>('google_sign_in').then(async (idToken) => {
-        if (idToken) {
-          try {
-            const cred = GoogleAuthProvider.credential((idToken as string).trim());
-            await signInWithCredential(auth, cred);
-            setShowAuthModal(false);
-          } catch (e) { console.warn("Native signInWithCredential failed:", e); }
-        }
-      }).catch(() => {});
-      // Also open Vercel for manual copy + loopback
-      try {
-        const { openUrl } = await import('@tauri-apps/plugin-opener');
-        openUrl("https://aether-smart.vercel.app/#/desktop-auth?source=tauri").catch(() => {});
-      } catch {}
-      invoke<string>('start_auth_server').then(async (token) => {
-        if (token) {
-          try {
-            const cred = GoogleAuthProvider.credential((token as string).trim());
-            await signInWithCredential(auth, cred);
-            setShowAuthModal(false);
-          } catch (e) { console.warn("Loopback signInWithCredential failed:", e); }
-        }
-      }).catch(() => {});
-      return;
-    }
-
     setLoading(true);
     setAuthError('');
     try {
@@ -235,22 +177,6 @@ function App() {
       console.error(e);
       setAuthError(e.message || 'Authentication failed. Please try again.');
       setLoading(false);
-    }
-  };
-
-  const handleSubmitPastedToken = async () => {
-    if (!pastedToken.trim()) return;
-    setAuthLoading(true);
-    try {
-      const credential = GoogleAuthProvider.credential(pastedToken.trim());
-      await signInWithCredential(auth, credential);
-      setShowAuthModal(false);
-      setPastedToken('');
-    } catch (err: any) {
-      console.error("Pasted token sign-in failed:", err);
-      setAuthError(err.message || "Invalid or expired token");
-    } finally {
-      setAuthLoading(false);
     }
   };
 
@@ -270,7 +196,7 @@ function App() {
       <Suspense fallback={<PageFallback />}>
         <Routes>
           <Route path="/desktop-auth" element={<DesktopAuth />} />
-          <Route path="*" element={<MainApp user={user} authError={authError} handleLogin={handleLogin} showAuthModal={showAuthModal} pastedToken={pastedToken} setPastedToken={setPastedToken} handleSubmitPastedToken={handleSubmitPastedToken} setShowAuthModal={setShowAuthModal} authLoading={authLoading} />} />
+          <Route path="*" element={<MainApp user={user} authError={authError} handleLogin={handleLogin} />} />
         </Routes>
       </Suspense>
     </Router>
