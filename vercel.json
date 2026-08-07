@@ -3,6 +3,12 @@
   "outputDirectory": "react-app/dist",
   "installCommand": "cd react-app && npm install",
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/((?!assets/|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/.well-known/assetlinks.json",

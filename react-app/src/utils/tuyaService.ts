@@ -130,7 +130,7 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       // localhost:5173 is not reachable from phone, and tauri://localhost is not
       // Firebase-authorized. Vercel is reachable and whitelisted.
       // See Language-Learning/src/pages/Home.jsx:139 for inspiration.
-      const authProxyUrl = "https://aether-smart.vercel.app/desktop-auth?source=tauri";
+      const authProxyUrl = "https://aether-smart.vercel.app/#/desktop-auth?source=tauri";
 
       // 1. Start the local server in Rust to listen for token
       const tokenPromise = invoke<string>('start_auth_server');
