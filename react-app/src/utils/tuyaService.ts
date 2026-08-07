@@ -1,7 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { 
-  getAuth, 
+  initializeAuth,
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  getAuth,
   GoogleAuthProvider, 
   signInWithPopup, 
   signInWithCredential,
@@ -101,10 +104,19 @@ const firebaseConfig = {
   measurementId: "G-GWRHMX8RE5"
 };
 
-// Initialize Firebase
+// Initialize Firebase — use modular auth with explicit persistence
+// to avoid cross-origin iframe bug in WebKitGTK (Linux) / Android WebView.
+// See Language-Learning-React-Apps/src/firebase.js for the proven pattern.
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
-export const auth = getAuth(app);
+let _auth: import('firebase/auth').Auth;
+try {
+  _auth = initializeAuth(app, { persistence: browserLocalPersistence });
+} catch {
+  // already initialized (HMR) — fall back
+  _auth = getAuth(app);
+}
+export const auth = _auth;
 export const googleProvider = new GoogleAuthProvider();
 
 // Google Auth Handlers
@@ -146,7 +158,7 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       throw err;
     }
   } else {
-    const result = await signInWithPopup(auth, googleProvider);
+    const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
     return result.user;
   }
 };
