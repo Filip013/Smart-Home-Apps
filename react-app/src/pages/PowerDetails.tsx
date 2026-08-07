@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
-  fetchAllDeviceData, 
-  fetchRealDailyClimateStats,
   fetchRealDayPowerStats,
   fetchRealDayClimateStats,
   fetchInstantPowerStats
 } from '../utils/deviceBridge';
 import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
-import { fetchInstantPowerFromWorkerProxy, fetchDailyHistoryAsync } from '../utils/workerService';
-import type { PowerMeter, TempSensor } from '../utils/mockData';
+import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
+import { useDeviceData } from '../context/DeviceDataContext';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
   Zap, 
@@ -74,16 +72,13 @@ export const PowerDetails: React.FC = () => {
   const location = useLocation();
   const routeState = location.state as { sensor?: string; metric?: string } | null;
 
-  const [powerData, setPowerData] = useState<PowerMeter | null>(null);
-  const [sensors, setSensors] = useState<TempSensor[]>([]);
-  const [climateHistory, setClimateHistory] = useState<{ date: string; sensors: any }[]>([]);
+  const { sensors, powerData, mode, loading, climateHistory: ctxClimateHistory, setPowerData } = useDeviceData();
+  // Keep demo mock generation local: if live history empty and demo mode, synthesize below
   const [timeRange, setTimeRange] = useState<'24h' | '30d'>('24h');
   const [selectedSensorKey, setSelectedSensorKey] = useState<string>(routeState?.sensor || 'sensor1');
   const [climateMetric, setClimateMetric] = useState<'temp' | 'humidity'>(
     routeState?.metric === 'humidity' ? 'humidity' : 'temp'
   );
-  const [mode, setMode] = useState<'demo' | 'live'>('demo');
-  const [loading, setLoading] = useState(true);
 
   // Calendar dates selection state
   const [selectedDate, setSelectedDate] = useState(getLocalTodayDateStr());
@@ -94,85 +89,35 @@ export const PowerDetails: React.FC = () => {
   const [historicalClimateDay, setHistoricalClimateDay] = useState<any | null>(null);
   const [historicalLoading, setHistoricalLoading] = useState(false);
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      const data = await fetchAllDeviceData();
-      setPowerData(data.power);
-      setSensors(data.sensors);
-      setMode(data.mode);
-      setLoading(false);
-
-      // Worker mode: backfill dailyHistory from Firestore in parallel
-      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
-        try {
-          const history = await fetchDailyHistoryAsync(
-            data.powerDeviceId,
-            data.energyCode || 'add_ele',
-          );
-          setPowerData(prev => prev ? {
-            ...prev,
-            dailyHistory:   history.dailyHistory,
-            weekKwh:        history.weekKwh,
-            monthKwh:       history.monthKwh,
-            estMonthlyCost: history.estMonthlyCost,
-            breakdown:      history.breakdown,
-          } : null);
-        } catch (e) {
-          console.warn('PowerDetails: Firestore daily history fetch failed (non-fatal):', e);
+  // Derive climateHistory: use cached context for live, synthesize mocks for demo
+  const climateHistory = React.useMemo(() => {
+    if (mode === 'live') return ctxClimateHistory;
+    if (ctxClimateHistory.length > 0) return ctxClimateHistory;
+    const mockHistory = [];
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = d.toISOString().split('T')[0];
+      mockHistory.push({
+        date: dateStr,
+        sensors: {
+          sensor1: {
+            avgTemp: Number((21.0 + Math.random() * 2.0).toFixed(1)),
+            minTemp: Number((19.0 + Math.random() * 1.5).toFixed(1)),
+            maxTemp: Number((24.0 + Math.random() * 2.0).toFixed(1)),
+            avgHumidity: Math.round(40 + Math.random() * 10)
+          },
+          sensor2: {
+            avgTemp: Number((26.0 + Math.random() * 4.0).toFixed(1)),
+            minTemp: Number((22.0 + Math.random() * 3.0).toFixed(1)),
+            maxTemp: Number((32.0 + Math.random() * 5.0).toFixed(1)),
+            avgHumidity: Math.round(70 + Math.random() * 15)
+          }
         }
-      }
-
-      if (data.mode === 'live') {
-        const history = await fetchRealDailyClimateStats();
-        setClimateHistory(history);
-      } else {
-        // Generate 30 days of mock climate history for demo mode
-        const mockHistory = [];
-        const now = new Date();
-        for (let i = 29; i >= 0; i--) {
-          const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-          const dateStr = d.toISOString().split('T')[0];
-          mockHistory.push({
-            date: dateStr,
-            sensors: {
-              sensor1: {
-                avgTemp: Number((21.0 + Math.random() * 2.0).toFixed(1)),
-                minTemp: Number((19.0 + Math.random() * 1.5).toFixed(1)),
-                maxTemp: Number((24.0 + Math.random() * 2.0).toFixed(1)),
-                avgHumidity: Math.round(40 + Math.random() * 10)
-              },
-              sensor2: {
-                avgTemp: Number((26.0 + Math.random() * 4.0).toFixed(1)),
-                minTemp: Number((22.0 + Math.random() * 3.0).toFixed(1)),
-                maxTemp: Number((32.0 + Math.random() * 5.0).toFixed(1)),
-                avgHumidity: Math.round(70 + Math.random() * 15)
-              }
-            }
-          });
-        }
-        setClimateHistory(mockHistory);
-      }
-    };
-    loadData();
-  }, []);
-
-  // Periodic worker data refetch (30s): the worker caches the 24h histories
-  // for 5 min, so each poll only refreshes live status — and recovers the
-  // 24h charts when the initial load landed on a rate-limited refresh.
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const data = await fetchAllDeviceData();
-        setPowerData(data.power);
-        setSensors(data.sensors);
-      } catch (err) {
-        console.error("Error refreshing live data:", err);
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
+      });
+    }
+    return mockHistory;
+  }, [mode, ctxClimateHistory]);
 
   // Periodic real-time power meter stats sync (Catering to Local TV Box IP vs Tuya Cloud Fallback)
   useEffect(() => {

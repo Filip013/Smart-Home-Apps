@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData, fetchInstantPowerStats } from '../utils/deviceBridge';
+import { fetchInstantPowerStats } from '../utils/deviceBridge';
 import { getCachedTuyaConfig, getWorkerModeEnabled } from '../utils/tuyaService';
-import { fetchInstantPowerFromWorkerProxy, fetchDailyHistoryAsync } from '../utils/workerService';
-import type { TempSensor, PowerMeter } from '../utils/mockData';
+import { fetchInstantPowerFromWorkerProxy } from '../utils/workerService';
+import { useDeviceData } from '../context/DeviceDataContext';
 import { LineAreaChart } from '../components/CustomChart';
 import { 
   Thermometer, 
@@ -35,68 +35,8 @@ const calculateDailyCostRSD = (kwh: number, hourlyKwh?: number[]) => {
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [connStatus, setConnStatus] = useState<{ status: 'local' | 'proxy' | 'cloud' | 'error'; detail?: string }>({ status: 'cloud' });
-  const [sensors, setSensors] = useState<TempSensor[]>([]);
-  const [powerData, setPowerData] = useState<PowerMeter | null>(null);
-  const [mode, setMode] = useState<'demo' | 'live'>('demo');
-  const [loading, setLoading] = useState(true);
+  const { sensors, powerData, mode, loading, dataSource, setPowerData } = useDeviceData();
   const [selectedMetrics, setSelectedMetrics] = useState<{ [sensorId: string]: 'temp' | 'humidity' }>({});
-  // Tracks whether dashboard data was loaded from the Cloudflare Worker or local Tuya calls
-  const [dataSource, setDataSource] = useState<'local' | 'worker'>(getWorkerModeEnabled() ? 'worker' : 'local');
-
-  // Initialize data — B+C: fetch worker data first (fast), then Firestore in parallel
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      const data = await fetchAllDeviceData();
-      setSensors(data.sensors);
-      setPowerData(data.power);
-      setMode(data.mode);
-      setDataSource(getWorkerModeEnabled() ? 'worker' : 'local');
-      setLoading(false);
-
-      // C: If in worker mode, kick off the Firestore daily history fetch in the
-      // background. The power card is already visible at this point, so this
-      // update arrives silently without blocking the initial render.
-      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
-        try {
-          const history = await fetchDailyHistoryAsync(
-            data.powerDeviceId,
-            data.energyCode || 'add_ele',
-          );
-          setPowerData(prev => prev ? {
-            ...prev,
-            dailyHistory:    history.dailyHistory,
-            weekKwh:         history.weekKwh,
-            monthKwh:        history.monthKwh,
-            estMonthlyCost:  history.estMonthlyCost,
-            breakdown:       history.breakdown,
-          } : null);
-        } catch (e) {
-          console.warn('Firestore daily history fetch failed (non-fatal):', e);
-        }
-      }
-    };
-    loadData();
-  }, []);
-
-  // Periodic live data sync (every 30 seconds). In worker mode this is now
-  // cheap: the worker caches the 24h histories for 5 min, so each poll only
-  // refetches live status — and a periodic refetch recovers the 24h charts
-  // when an initial load lands on a rate-limited refresh (Flutter already
-  // behaves this way via its 10s polling).
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const data = await fetchAllDeviceData();
-        setSensors(data.sensors);
-        setPowerData(data.power);
-      } catch (err) {
-        console.error("Error refreshing live data:", err);
-      }
-    }, 30000); // Sync every 30 seconds
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Periodic real-time power meter stats sync (Catering to Local TV Box IP vs Tuya Cloud Fallback)
   useEffect(() => {

@@ -1,9 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchAllDeviceData, fetchRealDailyClimateStats } from '../utils/deviceBridge';
-import { fetchDailyHistoryAsync } from '../utils/workerService';
-import { getWorkerModeEnabled } from '../utils/tuyaService';
-import type { PowerMeter, TempSensor } from '../utils/mockData';
+import { useDeviceData } from '../context/DeviceDataContext';
 import { LineAreaChart, BarChart } from '../components/CustomChart';
 import { 
   FileDown, 
@@ -15,11 +12,7 @@ import {
 
 export const ExportPrint: React.FC = () => {
   const navigate = useNavigate();
-  const [powerData, setPowerData] = useState<PowerMeter | null>(null);
-  const [sensors, setSensors] = useState<TempSensor[]>([]);
-  const [climateHistory, setClimateHistory] = useState<{ date: string; sensors: any }[]>([]);
-  const [mode, setMode] = useState<'demo' | 'live'>('demo');
-  const [loading, setLoading] = useState(true);
+  const { sensors, powerData, mode, loading, climateHistory: ctxClimateHistory } = useDeviceData();
 
   const getLocalCurrentMonthStr = () => {
     const now = new Date();
@@ -46,66 +39,31 @@ export const ExportPrint: React.FC = () => {
   const [selectedSensorKey, setSelectedSensorKey] = useState<string>('sensor1');
   const [climateMetric, setClimateMetric] = useState<'temp' | 'humidity'>('temp');
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      const data = await fetchAllDeviceData();
-      setPowerData(data.power);
-      setSensors(data.sensors);
-      setMode(data.mode);
-      setLoading(false);
-
-      // Worker mode: dailyHistory starts empty from the worker response.
-      // Fetch Firestore history in parallel and backfill once ready —
-      // same pattern as Dashboard so the export tab shows full history.
-      if (getWorkerModeEnabled() && data.powerDeviceId && data.power) {
-        try {
-          const history = await fetchDailyHistoryAsync(
-            data.powerDeviceId,
-            data.energyCode || 'add_ele',
-          );
-          setPowerData(prev => prev ? {
-            ...prev,
-            dailyHistory:   history.dailyHistory,
-            weekKwh:        history.weekKwh,
-            monthKwh:       history.monthKwh,
-            estMonthlyCost: history.estMonthlyCost,
-            breakdown:      history.breakdown,
-          } : null);
-        } catch (e) {
-          console.warn('ExportPrint: Firestore daily history fetch failed (non-fatal):', e);
+  // Demo mock: synthesize 90d climate history locally when context is empty in demo mode
+  const climateHistory = React.useMemo(() => {
+    if (mode === 'live') return ctxClimateHistory;
+    if (ctxClimateHistory.length > 0) return ctxClimateHistory;
+    const mockHistory = [];
+    const now = new Date();
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      const dateStr = d.toISOString().split('T')[0];
+      mockHistory.push({
+        date: dateStr,
+        sensors: {
+          sensor1: {
+            avgTemp: Number((21.0 + Math.random() * 2.0).toFixed(1)),
+            avgHumidity: Math.round(40 + Math.random() * 10)
+          },
+          sensor2: {
+            avgTemp: Number((26.0 + Math.random() * 4.0).toFixed(1)),
+            avgHumidity: Math.round(70 + Math.random() * 15)
+          }
         }
-      }
-
-      if (data.mode === 'live') {
-        const history = await fetchRealDailyClimateStats();
-        setClimateHistory(history);
-      } else {
-        // Generate 90 days of mock climate history for demo mode
-        const mockHistory = [];
-        const now = new Date();
-        for (let i = 89; i >= 0; i--) {
-          const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-          const dateStr = d.toISOString().split('T')[0];
-          mockHistory.push({
-            date: dateStr,
-            sensors: {
-              sensor1: {
-                avgTemp: Number((21.0 + Math.random() * 2.0).toFixed(1)),
-                avgHumidity: Math.round(40 + Math.random() * 10)
-              },
-              sensor2: {
-                avgTemp: Number((26.0 + Math.random() * 4.0).toFixed(1)),
-                avgHumidity: Math.round(70 + Math.random() * 15)
-              }
-            }
-          });
-        }
-        setClimateHistory(mockHistory);
-      }
-    };
-    loadData();
-  }, []);
+      });
+    }
+    return mockHistory;
+  }, [mode, ctxClimateHistory]);
 
   if (loading) {
     return (

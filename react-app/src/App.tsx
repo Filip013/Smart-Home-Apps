@@ -5,6 +5,7 @@ import type { User } from 'firebase/auth';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Zap } from 'lucide-react';
+import { DeviceDataProvider } from './context/DeviceDataContext';
 import './index.css';
 
 // F: Lazy-load heavy pages — they're not needed on the initial render, so
@@ -129,17 +130,19 @@ function MainApp({ user, authError, handleLogin }: { user: User | null; authErro
   }
 
   return (
-    <Layout>
-      <Suspense fallback={<PageFallback />}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/power" element={<PowerDetails />} />
-          <Route path="/export" element={<ExportPrint />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
-    </Layout>
+    <DeviceDataProvider>
+      <Layout>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/power" element={<PowerDetails />} />
+            <Route path="/export" element={<ExportPrint />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </Layout>
+    </DeviceDataProvider>
   );
 }
 
