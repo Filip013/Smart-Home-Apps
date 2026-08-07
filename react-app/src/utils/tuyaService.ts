@@ -126,13 +126,11 @@ export const signInWithGoogle = async (): Promise<User | null> => {
   if (isTauri()) {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      // In development, use local dev server. In production, use window.location.origin or Vercel URL
-      const baseUrl = import.meta.env.DEV 
-        ? "http://localhost:5173" 
-        : (window.location.origin.startsWith('http') && !window.location.origin.includes('tauri')
-            ? window.location.origin
-            : "https://aether-smart.vercel.app");
-      const authProxyUrl = `${baseUrl}/#/desktop-auth?source=tauri`;
+      // LingoHub pattern: always use Vercel for Tauri (desktop + Android).
+      // localhost:5173 is not reachable from phone, and tauri://localhost is not
+      // Firebase-authorized. Vercel is reachable and whitelisted.
+      // See Language-Learning/src/pages/Home.jsx:139 for inspiration.
+      const authProxyUrl = "https://aether-smart.vercel.app/desktop-auth?source=tauri";
 
       // 1. Start the local server in Rust to listen for token
       const tokenPromise = invoke<string>('start_auth_server');
