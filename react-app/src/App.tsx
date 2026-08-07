@@ -6,6 +6,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { Zap } from 'lucide-react';
 import { DeviceDataProvider } from './context/DeviceDataContext';
+import { isTauri } from '@tauri-apps/api/core';
 import './index.css';
 
 // F: Lazy-load heavy pages — they're not needed on the initial render, so
@@ -155,10 +156,13 @@ function App() {
   const [authError, setAuthError] = useState('');
 
   useEffect(() => {
-    // Check if coming back from a redirect sign-in flow
-    getRedirectResult(auth).catch((err) => {
-      console.warn("Redirect sign-in error:", err);
-    });
+    // Web only: check redirect flow. Skip on Tauri (Android/desktop) where
+    // tauri://localhost triggers auth/argument-error in WebView (see logcat).
+    if (!isTauri()) {
+      getRedirectResult(auth).catch((err) => {
+        console.warn("Redirect sign-in error:", err);
+      });
+    }
 
     // Listen to Firebase Auth state shifts
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {

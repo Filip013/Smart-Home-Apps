@@ -119,6 +119,9 @@ try {
 export const auth = _auth;
 export const googleProvider = new GoogleAuthProvider();
 
+// Prevent parallel start_auth_server binds (AddrInUse) when user double-taps login
+let pendingAuthServer: Promise<string> | null = null;
+
 // Google Auth Handlers
 export const signInWithGoogle = async (): Promise<User | null> => {
   googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -132,8 +135,16 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       // See Language-Learning/src/pages/Home.jsx:139 for inspiration.
       const authProxyUrl = "https://aether-smart.vercel.app/#/desktop-auth?source=tauri";
 
-      // 1. Start the local server in Rust to listen for token
-      const tokenPromise = invoke<string>('start_auth_server');
+      // 1. Start the local server in Rust to listen for token (reuse pending if already listening)
+      if (!pendingAuthServer) {
+        pendingAuthServer = invoke<string>('start_auth_server').finally(() => {
+          // clear after resolve/reject so next login can bind fresh
+          setTimeout(() => { pendingAuthServer = null; }, 1000);
+        });
+        // swallow AddrInUse background error until awaited
+        pendingAuthServer.catch(() => {});
+      }
+      const tokenPromise = pendingAuthServer;
 
       // 2. Open default browser (fall back to window.open if plugin-opener fails)
       openUrl(authProxyUrl).catch((err: any) => {
