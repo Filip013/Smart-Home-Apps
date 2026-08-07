@@ -132,9 +132,25 @@ export const signInWithGoogle = async (): Promise<User | null> => {
   googleProvider.setCustomParameters({ prompt: 'select_account' });
   
   if (isTauri()) {
+    // Android native: try Credential Manager / GoogleSignIn first (no Vercel, uses google-services.json)
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid) {
+      try {
+        const idToken = await invoke<string>('google_sign_in');
+        if (idToken) {
+          const credential = GoogleAuthProvider.credential(idToken.trim());
+          const result = await signInWithCredential(auth, credential);
+          return result.user;
+        }
+      } catch (nativeErr) {
+        console.warn("Native Google Sign-In failed, falling back to Vercel bridge:", nativeErr);
+        // fall through to Vercel loopback
+      }
+    }
+
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      // LingoHub pattern: always use Vercel for Tauri (desktop + Android).
+      // LingoHub pattern: always use Vercel for Tauri (desktop + Android fallback).
       // localhost:5173 is not reachable from phone, and tauri://localhost is not
       // Firebase-authorized. Vercel is reachable and whitelisted.
       // See Language-Learning/src/pages/Home.jsx:139 for inspiration.
