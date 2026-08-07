@@ -458,8 +458,8 @@ export const Dashboard: React.FC = () => {
       {/* Overview Banner / Hero section */}
       <section className="overview-hero glass" aria-label="System Quick Summary">
         <div className="hero-welcome">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '8px' }}>
-              <h2 style={{ margin: 0 }}>Welcome Back</h2>
+            <h2 style={{ margin: 0 }}>Welcome Back</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '8px', marginBottom: '8px' }}>
               {/* Data source badge — reflects how the history/sensor data was loaded */}
               <div
                 id="data-source-badge"
