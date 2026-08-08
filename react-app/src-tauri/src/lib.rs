@@ -40,8 +40,17 @@ async fn start_auth_server() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_opener::init())
+  #[allow(unused_mut)]
+  let mut builder = tauri::Builder::default()
+    .plugin(tauri_plugin_opener::init());
+
+  // Remember window size + position across launches (desktop only)
+  #[cfg(desktop)]
+  {
+    builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+  }
+
+  builder
     .invoke_handler(tauri::generate_handler![start_auth_server])
     .setup(|app| {
       if cfg!(debug_assertions) {
