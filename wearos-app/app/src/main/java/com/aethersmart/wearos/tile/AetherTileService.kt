@@ -91,17 +91,17 @@ class AetherTileService : TileService() {
             .addContent(
                 LayoutElementBuilders.Image.Builder()
                     .setResourceId("ic_zap")
-                    .setWidth(dp(18f)).setHeight(dp(18f))
+                    .setWidth(dp(15f)).setHeight(dp(15f))
                     .setColorFilter(LayoutElementBuilders.ColorFilter.Builder().setTint(C_INDIGO).build())
                     .build()
             )
             .addContent(
-                LayoutElementBuilders.Spacer.Builder().setWidth(dp(6f)).build()
+                LayoutElementBuilders.Spacer.Builder().setWidth(dp(5f)).build()
             )
             .addContent(
                 LayoutElementBuilders.Column.Builder()
-                    .addContent(text("AetherSmart", 13f, C_TEXT, bold = true, lines = 1))
-                    .addContent(text("Smart home glance", 9f, C_MUTED, lines = 1))
+                    .addContent(text("AetherSmart", 12f, C_TEXT, bold = true, lines = 1))
+                    .addContent(text("Smart home", 8f, C_MUTED, lines = 1))
                     .build()
             )
             .build()
@@ -116,10 +116,10 @@ class AetherTileService : TileService() {
                                 .setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(9f)).build())
                                 .build()
                         )
-                        .setPadding(ModifiersBuilders.Padding.Builder().setStart(dp(8f)).setEnd(dp(8f)).setTop(dp(4f)).setBottom(dp(4f)).build())
+                        .setPadding(ModifiersBuilders.Padding.Builder().setStart(dp(7f)).setEnd(dp(7f)).setTop(dp(3f)).setBottom(dp(3f)).build())
                         .build()
                 )
-                .addContent(text("LIVE", 9f, color(0xFF1A1A1A), bold = true, lines = 1))
+                .addContent(text("LIVE", 8f, color(0xFF1A1A1A), bold = true, lines = 1))
                 .build()
             else null
 
@@ -139,23 +139,23 @@ class AetherTileService : TileService() {
             .setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build())
             .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
             .addContent(
-                LayoutElementBuilders.Text.Builder().setText(if (inLive) powerStr else if (d.w != null) powerStr else "—").setFontStyle(font(30f, C_TEXT, bold = true)).setMaxLines(1).build()
+                LayoutElementBuilders.Text.Builder().setText(if (inLive) powerStr else if (d.w != null) powerStr else "—").setFontStyle(font(24f, C_TEXT, bold = true)).setMaxLines(1).build()
             )
-            .addContent(text(if (inLive) "W · LIVE" else "WATTS", 9f, if (inLive) C_AMBER else C_INDIGO, bold = true, lines = 1, ls = 0.18f))
+            .addContent(text(if (inLive) "W · LIVE" else "WATTS", 8f, if (inLive) C_AMBER else C_INDIGO, bold = true, lines = 1, ls = 0.18f))
             .addContent(
-                LayoutElementBuilders.Spacer.Builder().setHeight(dp(2f)).build()
+                LayoutElementBuilders.Spacer.Builder().setHeight(dp(1f)).build()
             )
-            .addContent(text(sourceLabel, 10f, sourceColor, lines = 1))
+            .addContent(text(sourceLabel, 8f, sourceColor, lines = 1))
             .build()
 
         val ringBox = LayoutElementBuilders.Box.Builder()
-            .setWidth(dp(148f)).setHeight(dp(148f))
+            .setWidth(dp(104f)).setHeight(dp(104f))
             .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(liveClickable("live_power")).build())
             .addContent(
                 CircularProgressIndicator.Builder()
                     .setProgress(progress)
                     .setStartAngle(0f).setEndAngle(300f)
-                    .setStrokeWidth(10f)
+                    .setStrokeWidth(8f)
                     .setCircularProgressIndicatorColors(ProgressIndicatorColors(C_INDIGO, C_TRACK))
                     .setContentDescription("Power load $powerStr watts")
                     .build()
@@ -164,14 +164,14 @@ class AetherTileService : TileService() {
             .build()
 
         // Temp cards
-        val bgCard = ModifiersBuilders.Background.Builder().setColor(C_CARD).setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(14f)).build()).build()
-        val cardPadding = ModifiersBuilders.Padding.Builder().setAll(dp(10f)).build()
+        val bgCard = ModifiersBuilders.Background.Builder().setColor(C_CARD).setCorner(ModifiersBuilders.Corner.Builder().setRadius(dp(12f)).build()).build()
+        val cardPadding = ModifiersBuilders.Padding.Builder().setAll(dp(7f)).build()
 
         fun tempCard(label: String, temp: Double?, hum: Double?, icon: String, iconColor: ColorBuilders.ColorProp, tempColor: ColorBuilders.ColorProp): LayoutElementBuilders.Box {
             val tempStr = temp?.let { "%.1f°C".format(it) } ?: "—"
             val humStr = hum?.let { "${it.toInt()}%" } ?: "—"
             return LayoutElementBuilders.Box.Builder()
-                .setWidth(dp(104f))
+                .setWidth(dp(88f))
                 .setModifiers(ModifiersBuilders.Modifiers.Builder().setBackground(bgCard).setPadding(cardPadding).build())
                 .addContent(
                     LayoutElementBuilders.Column.Builder()
@@ -180,28 +180,28 @@ class AetherTileService : TileService() {
                                 .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
                                 .addContent(
                                     LayoutElementBuilders.Image.Builder()
-                                        .setResourceId(icon).setWidth(dp(12f)).setHeight(dp(12f))
+                                        .setResourceId(icon).setWidth(dp(10f)).setHeight(dp(10f))
                                         .setColorFilter(LayoutElementBuilders.ColorFilter.Builder().setTint(iconColor).build())
                                         .build()
                                 )
-                                .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(dp(4f)).build())
-                                .addContent(text(label, 10f, C_MUTED, lines = 1, maxLines = 1))
+                                .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(dp(3f)).build())
+                                .addContent(text(label, 9f, C_MUTED, lines = 1, maxLines = 1))
                                 .build()
                         )
-                        .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(4f)).build())
-                        .addContent(text(tempStr, 17f, tempColor, bold = true, lines = 1))
                         .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(3f)).build())
+                        .addContent(text(tempStr, 15f, tempColor, bold = true, lines = 1))
+                        .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(2f)).build())
                         .addContent(
                             LayoutElementBuilders.Row.Builder()
                                 .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
                                 .addContent(
                                     LayoutElementBuilders.Image.Builder()
-                                        .setResourceId("ic_droplet").setWidth(dp(11f)).setHeight(dp(11f))
+                                        .setResourceId("ic_droplet").setWidth(dp(10f)).setHeight(dp(10f))
                                         .setColorFilter(LayoutElementBuilders.ColorFilter.Builder().setTint(C_EMERALD).build())
                                         .build()
                                 )
-                                .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(dp(4f)).build())
-                                .addContent(text(humStr, 11f, C_MUTED, lines = 1))
+                                .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(dp(3f)).build())
+                                .addContent(text(humStr, 10f, C_MUTED, lines = 1))
                                 .build()
                         )
                         .build()
@@ -218,16 +218,16 @@ class AetherTileService : TileService() {
             .build()
 
         // Footer hint
-        val hint = text(if (inLive) "LIVE · tap ring to extend" else "tap ring = LIVE 15s · bg = app", 9f, C_MUTED, lines = 1)
+        val hint = text(if (inLive) "LIVE · tap ring to extend" else "tap ring = LIVE 15s · bg = app", 8f, C_MUTED, lines = 1)
 
         val rootColumn = LayoutElementBuilders.Column.Builder()
             .setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build())
             .addContent(header)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(12f)).build())
+            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(6f)).build())
             .addContent(ringBox)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(10f)).build())
+            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(6f)).build())
             .addContent(cardRow)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(8f)).build())
+            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(5f)).build())
             .addContent(hint)
             .build()
 
@@ -238,7 +238,7 @@ class AetherTileService : TileService() {
             .setModifiers(
                 ModifiersBuilders.Modifiers.Builder()
                     .setBackground(ModifiersBuilders.Background.Builder().setColor(C_BG).build())
-                    .setPadding(ModifiersBuilders.Padding.Builder().setAll(dp(8f)).build())
+                    .setPadding(ModifiersBuilders.Padding.Builder().setAll(dp(4f)).build())
                     .setClickable(launchClickable())
                     .build()
             )
