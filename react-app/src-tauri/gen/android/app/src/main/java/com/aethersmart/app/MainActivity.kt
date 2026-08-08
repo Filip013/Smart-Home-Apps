@@ -1,6 +1,5 @@
 package com.aethersmart.app
 
-import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
@@ -28,10 +27,5 @@ class MainActivity : TauriActivity() {
     }
     // Dark background behind the transparent bars (matches --color-bg)
     window.decorView.setBackgroundColor(Color.parseColor("#0b0f19"))
-  }
-
-  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-    super.onActivityResult(requestCode, resultCode, data)
-    GoogleAuthHelper.onActivityResult(requestCode, resultCode, data)
   }
 }
