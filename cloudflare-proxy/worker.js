@@ -726,6 +726,59 @@ export default {
         }), { headers: corsHeaders() });
       }
 
+      // ROUTE 2c: GET /api/wear-live — real-time power from TV Box (localtuya, 3s poll, 15s tile burst)
+      if (url.pathname === '/api/wear-live' && request.method === 'GET') {
+        const config = await getConfig(env, url);
+        const creds = { clientId: config.clientId, clientSecret: config.clientSecret, region: config.region };
+        // Prefer TV Box (local, sub-second) — fallback to Tuya cloud cur_power if box unreachable
+        let tvLive = null;
+        let source = 'none';
+        const tvBoxUrl = env.TV_BOX_POWER_URL || config.tvBoxUrl;
+        if (tvBoxUrl) {
+          try {
+            const tvHeaders = { 'Accept': 'application/json', 'User-Agent': 'SmartHomeWorker/1.0' };
+            const secretToken = env.TUYA_CLIENT_SECRET || env.AUTH_SECRET || config.clientSecret;
+            if (secretToken) tvHeaders['Authorization'] = secretToken.startsWith('Bearer ') ? secretToken : `Bearer ${secretToken}`;
+            const tvRes = await fetch(tvBoxUrl, { method: 'GET', headers: tvHeaders, signal: AbortSignal.timeout(4000) });
+            if (tvRes.ok) {
+              const text = await tvRes.text();
+              try {
+                const j = JSON.parse(text);
+                // daemon.py returns { currentLoad, voltage, currentAmps, ... }
+                if (j.currentLoad !== undefined) {
+                  tvLive = { powerWatts: Math.round(Number(j.currentLoad) || 0), voltage: Number(j.voltage) || 0, currentAmps: Number(j.currentAmps) || 0 };
+                  source = 'tvbox';
+                } else if (j.powerWatts !== undefined) {
+                  tvLive = { powerWatts: Math.round(Number(j.powerWatts) || 0), voltage: Number(j.voltage) || 0, currentAmps: Number(j.currentAmps) || 0 };
+                  source = 'tvbox';
+                }
+              } catch (_) { /* ignore */ }
+            }
+          } catch (_) { /* tvbox unreachable -> fallback */ }
+        }
+        if (!tvLive && config.powerDeviceId) {
+          try {
+            const res = await makeTuyaRequest(env, `/v1.0/devices/${config.powerDeviceId}/status`, 'GET', null, creds);
+            const status = res.result || [];
+            const pVal = status.find(s => s.code === config.powerCode || s.code === 'cur_power')?.value;
+            const vVal = status.find(s => s.code === config.voltCode || s.code === 'cur_voltage')?.value;
+            const iVal = status.find(s => s.code === config.currCode || s.code === 'cur_current')?.value;
+            tvLive = {
+              powerWatts: pVal !== undefined ? Math.round(scalePower(pVal)) : 0,
+              voltage: vVal !== undefined ? Number(scaleVoltage(vVal).toFixed(1)) : 0,
+              currentAmps: iVal !== undefined ? Number(scaleCurrent(iVal).toFixed(2)) : 0,
+            };
+            source = 'tuya';
+          } catch (_) { tvLive = { powerWatts: 0, voltage: 0, currentAmps: 0 }; source = 'error'; }
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          timestamp: Math.floor(Date.now() / 1000),
+          source,
+          ...tvLive
+        }), { headers: corsHeaders() });
+      }
+
       // ROUTE 2b: Wear OS Pairing — watch shows code, web claims it (no auth, short TTL)
       // POST /api/wear-pair/register  { } -> { code, expiresIn }
       if (url.pathname === '/api/wear-pair/register' && request.method === 'POST') {
@@ -845,7 +898,7 @@ export default {
 
       return new Response(JSON.stringify({
         message: 'Smart Home Cloudflare Worker API is running.',
-        endpoints: ['GET /api/status', 'GET /api/wear-summary', 'POST /api/control', 'POST /api/wear-pair/register', 'POST /api/wear-pair/claim', 'GET /api/wear-pair/status', 'GET /proxy?url=...']
+        endpoints: ['GET /api/status', 'GET /api/wear-summary', 'GET /api/wear-live', 'POST /api/control', 'POST /api/wear-pair/register', 'POST /api/wear-pair/claim', 'GET /api/wear-pair/status', 'GET /proxy?url=...']
       }), { headers: corsHeaders() });
 
     } catch (err) {

@@ -40,6 +40,17 @@ data class SensorReading(
     val humidity: Double? = null
 )
 
+@Serializable
+data class WearLiveResponse(
+    val success: Boolean,
+    val timestamp: Long? = null,
+    val source: String? = null,
+    val powerWatts: Double? = null,
+    val voltage: Double? = null,
+    val currentAmps: Double? = null,
+    val error: String? = null
+)
+
 class WearSummaryApi(
     private val okHttp: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
@@ -98,6 +109,28 @@ class WearSummaryApi(
         } catch (e: Exception) {
             return@withContext Result.failure(e)
         }
+    }
+
+    suspend fun fetchWearLive(settings: WearSettings): Result<WearLiveResponse> = withContext(Dispatchers.IO) {
+        try {
+            val base = settings.workerUrl.trim().trimEnd('/').ifBlank { return@withContext Result.failure(IllegalArgumentException("Worker URL not configured")) }
+            val url = buildString {
+                append(base); append("/api/wear-live?")
+                append("clientId=").append(encode(settings.clientId))
+                append("&clientSecret=").append(encode(settings.clientSecret))
+                append("&region=").append(encode(settings.region))
+                if (settings.powerDeviceId.isNotBlank()) append("&powerDeviceId=").append(encode(settings.powerDeviceId))
+                if (settings.powerCode.isNotBlank()) append("&powerCode=").append(encode(settings.powerCode))
+            }
+            val authHeader = if (settings.clientSecret.startsWith("Bearer ")) settings.clientSecret else "Bearer ${settings.clientSecret}"
+            val req = Request.Builder().url(url).get().header("Accept", "application/json").header("Authorization", authHeader).build()
+            val resp = okHttp.newCall(req).execute()
+            val body = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) return@withContext Result.failure(Exception("HTTP ${resp.code}: $body"))
+            val parsed = json.decodeFromString<WearLiveResponse>(body)
+            if (!parsed.success) return@withContext Result.failure(Exception(parsed.error ?: "Unknown"))
+            return@withContext Result.success(parsed)
+        } catch (e: Exception) { return@withContext Result.failure(e) }
     }
 
     private fun encode(v: String): String = java.net.URLEncoder.encode(v, "UTF-8")
