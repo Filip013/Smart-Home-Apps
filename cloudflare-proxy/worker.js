@@ -726,6 +726,87 @@ export default {
         }), { headers: corsHeaders() });
       }
 
+      // ROUTE 2b: Wear OS Pairing — watch shows code, web claims it (no auth, short TTL)
+      // POST /api/wear-pair/register  { } -> { code, expiresIn }
+      if (url.pathname === '/api/wear-pair/register' && request.method === 'POST') {
+        if (!env.SMART_HOME_CONFIG) {
+          return new Response(JSON.stringify({ success: false, error: 'KV not bound' }), { status: 500, headers: corsHeaders() });
+        }
+        const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit
+        const key = `pair_${code}`;
+        // Ensure uniqueness (collision ~1/900k, retry once if needed)
+        const existing = await env.SMART_HOME_CONFIG.get(key);
+        const finalCode = existing ? Math.floor(100000 + Math.random() * 900000).toString() : code;
+        const finalKey = existing ? `pair_${finalCode}` : key;
+        const payload = { code: finalCode, claimed: false, config: null, createdAt: Date.now() };
+        await env.SMART_HOME_CONFIG.put(finalKey, JSON.stringify(payload), { expirationTtl: 300 });
+        return new Response(JSON.stringify({ success: true, code: finalCode, expiresIn: 300 }), { headers: corsHeaders() });
+      }
+      // POST /api/wear-pair/claim  { code, clientId, clientSecret, region, ...config }
+      if (url.pathname === '/api/wear-pair/claim' && request.method === 'POST') {
+        if (!env.SMART_HOME_CONFIG) {
+          return new Response(JSON.stringify({ success: false, error: 'KV not bound' }), { status: 500, headers: corsHeaders() });
+        }
+        const body = await request.json();
+        const code = String(body.code || '').trim();
+        if (!/^\d{6}$/.test(code)) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid code' }), { status: 400, headers: corsHeaders() });
+        }
+        const key = `pair_${code}`;
+        const raw = await env.SMART_HOME_CONFIG.get(key, 'json');
+        if (!raw) {
+          return new Response(JSON.stringify({ success: false, error: 'Code expired or not found' }), { status: 404, headers: corsHeaders() });
+        }
+        if (raw.claimed) {
+          return new Response(JSON.stringify({ success: false, error: 'Code already claimed' }), { status: 409, headers: corsHeaders() });
+        }
+        // Minimal validation — workerUrl is hardcoded to smart-home-api.filip013.workers.dev but allow override
+        const claimedPayload = {
+          code,
+          claimed: true,
+          claimedAt: Date.now(),
+          config: {
+            clientId: String(body.clientId || '').trim(),
+            clientSecret: String(body.clientSecret || '').trim(),
+            region: String(body.region || 'eu').trim() || 'eu',
+            tempDeviceId1: String(body.tempDeviceId1 || '').trim(),
+            tempDeviceId2: String(body.tempDeviceId2 || '').trim(),
+            powerDeviceId: String(body.powerDeviceId || '').trim(),
+            tempCode1: String(body.tempCode1 || 'va_temperature').trim(),
+            humCode1: String(body.humCode1 || 'va_humidity').trim(),
+            tempCode2: String(body.tempCode2 || 'va_temperature').trim(),
+            humCode2: String(body.humCode2 || 'va_humidity').trim(),
+            powerCode: String(body.powerCode || 'cur_power').trim(),
+            // allow custom worker URL override, else watcher uses hardcoded default
+            customProxyUrl: String(body.customProxyUrl || body.workerUrl || 'https://smart-home-api.filip013.workers.dev').trim(),
+          }
+        };
+        // Keep for 5 more minutes so watch can poll and fetch
+        await env.SMART_HOME_CONFIG.put(key, JSON.stringify(claimedPayload), { expirationTtl: 300 });
+        return new Response(JSON.stringify({ success: true, message: 'Paired' }), { headers: corsHeaders() });
+      }
+      // GET /api/wear-pair/status?code=XXXXXX  -> { claimed, config? }
+      if (url.pathname === '/api/wear-pair/status' && request.method === 'GET') {
+        if (!env.SMART_HOME_CONFIG) {
+          return new Response(JSON.stringify({ success: false, error: 'KV not bound' }), { status: 500, headers: corsHeaders() });
+        }
+        const code = String(url.searchParams.get('code') || '').trim();
+        if (!/^\d{6}$/.test(code)) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid code' }), { status: 400, headers: corsHeaders() });
+        }
+        const key = `pair_${code}`;
+        const raw = await env.SMART_HOME_CONFIG.get(key, 'json');
+        if (!raw) {
+          return new Response(JSON.stringify({ success: false, error: 'Code expired or not found' }), { status: 404, headers: corsHeaders() });
+        }
+        if (!raw.claimed) {
+          return new Response(JSON.stringify({ success: true, claimed: false }), { headers: corsHeaders() });
+        }
+        // Return config once, then delete to prevent replay
+        try { await env.SMART_HOME_CONFIG.delete(key); } catch (_) {}
+        return new Response(JSON.stringify({ success: true, claimed: true, config: raw.config }), { headers: corsHeaders() });
+      }
+
       // ROUTE 3: POST /api/control
       if (url.pathname === '/api/control' && request.method === 'POST') {
         const config = await getConfig(env, url);
@@ -764,7 +845,7 @@ export default {
 
       return new Response(JSON.stringify({
         message: 'Smart Home Cloudflare Worker API is running.',
-        endpoints: ['GET /api/status', 'GET /api/wear-summary', 'POST /api/control', 'GET /proxy?url=...']
+        endpoints: ['GET /api/status', 'GET /api/wear-summary', 'POST /api/control', 'POST /api/wear-pair/register', 'POST /api/wear-pair/claim', 'GET /api/wear-pair/status', 'GET /proxy?url=...']
       }), { headers: corsHeaders() });
 
     } catch (err) {

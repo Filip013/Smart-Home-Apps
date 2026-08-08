@@ -25,7 +25,8 @@ import {
   ChevronUp,
   Sun,
   Moon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Watch
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -36,6 +37,56 @@ export const Settings: React.FC = () => {
   const [dbExpanded, setDbExpanded] = useState(false);
   const [appearanceExpanded, setAppearanceExpanded] = useState(false);
   const [dataSourceExpanded, setDataSourceExpanded] = useState(false);
+  const [pairExpanded, setPairExpanded] = useState(true);
+  const [pairCode, setPairCode] = useState('');
+  const [pairStatus, setPairStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [pairMsg, setPairMsg] = useState('');
+
+  const handlePairWatch = async () => {
+    const code = pairCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setPairStatus('error');
+      setPairMsg('Enter the 6-digit code shown on the watch.');
+      return;
+    }
+    if (!clientId.trim() || !clientSecret.trim()) {
+      setPairStatus('error');
+      setPairMsg('Save Tuya Client ID / Secret first (Tuya section).');
+      return;
+    }
+    const workerBase = (customProxyUrl.trim() || 'https://smart-home-api.filip013.workers.dev').replace(/\/$/, '');
+    setPairStatus('sending');
+    setPairMsg('');
+    try {
+      const res = await fetch(`${workerBase}/api/wear-pair/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          clientId: clientId.trim(),
+          clientSecret: clientSecret.trim(),
+          region,
+          tempDeviceId1: tempDeviceId1.trim(),
+          tempDeviceId2: tempDeviceId2.trim(),
+          powerDeviceId: powerDeviceId.trim(),
+          tempCode1: tempCode1.trim(),
+          humCode1: humCode1.trim(),
+          tempCode2: tempCode2.trim(),
+          humCode2: humCode2.trim(),
+          powerCode: powerCode.trim(),
+          customProxyUrl: customProxyUrl.trim() || workerBase,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+      setPairStatus('success');
+      setPairMsg('Paired! Watch will connect within seconds.');
+      setPairCode('');
+    } catch (err: any) {
+      setPairStatus('error');
+      setPairMsg(err.message || 'Pairing failed.');
+    }
+  };
 
   // Worker mode (device-local only — never synced to Firebase)
   const [workerModeEnabled, setWorkerModeEnabledState] = useState<boolean>(() => getWorkerModeEnabled());
@@ -712,6 +763,59 @@ export const Settings: React.FC = () => {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+          </section>
+
+          {/* ─── Pair Watch ─── */}
+          <section className="dashboard-card glass" aria-labelledby="pair-watch-title">
+            <div
+              className="card-header"
+              onClick={() => setPairExpanded(!pairExpanded)}
+              style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+            >
+              <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Watch className="card-icon" style={{ color: '#f59e0b' }} />
+                <h3 id="pair-watch-title" style={{ margin: 0 }}>Pair Watch (Wear OS)</h3>
+              </div>
+              <div className="text-muted" style={{ display: 'flex', alignItems: 'center' }}>
+                {pairExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+              </div>
+            </div>
+            {pairExpanded && (
+              <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+                <p style={{ margin: 0, fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+                  On your watch open <strong>AetherSmart</strong> → <strong>Pair Watch</strong> (shown automatically on first launch). Enter the 6-digit code here. The watch polls <code>smart-home-api.filip013.workers.dev</code> and receives your Tuya credentials + Worker URL instantly. Code expires in 5 min.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={6}
+                    placeholder="123456"
+                    value={pairCode}
+                    onChange={(e) => setPairCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    style={{ flex: '1 1 140px', minWidth: 120, padding: '10px', borderRadius: '6px', border: '1px solid var(--color-border)', backgroundColor: 'var(--color-hover-bg)', color: 'var(--color-text)', fontSize: '18px', letterSpacing: '0.3em', textAlign: 'center', fontWeight: 700 }}
+                  />
+                  <button type="button" onClick={handlePairWatch} disabled={pairStatus === 'sending'} className="btn primary" style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {pairStatus === 'sending' && <RefreshCw size={14} className="animate-spin" />}
+                    <span>Pair</span>
+                  </button>
+                </div>
+                {pairStatus === 'success' && (
+                  <div className="alert-banner success" style={{ backgroundColor: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)', color: 'var(--color-secondary)', margin: 0 }}>
+                    <CheckCircle2 size={15} /><span>{pairMsg}</span>
+                  </div>
+                )}
+                {pairStatus === 'error' && (
+                  <div className="alert-banner warning" style={{ backgroundColor: 'rgba(244,63,94,0.1)', borderColor: 'rgba(244,63,94,0.2)', color: 'var(--color-danger)', margin: 0 }}>
+                    <XCircle size={15} /><span>{pairMsg}</span>
+                  </div>
+                )}
+                <p style={{ margin: 0, fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                  Hardcoded Worker: <code>smart-home-api.filip013.workers.dev</code> (editable in Tuya → Custom CORS Proxy URL). Watch defaults to it if you leave that field blank.
+                </p>
               </div>
             )}
           </section>

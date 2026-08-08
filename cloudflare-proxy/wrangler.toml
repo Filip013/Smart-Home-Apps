@@ -1,3 +1,7 @@
 name = "smart-home-api"
 main = "worker.js"
 compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "SMART_HOME_CONFIG"
+id = "209e10d9e8664ab2b295d543780af6fb"
