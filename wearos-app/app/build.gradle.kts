@@ -59,6 +59,7 @@ dependencies {
     // Tiles & Complications
     implementation("androidx.wear.tiles:tiles:1.3.0")
     implementation("androidx.wear.protolayout:protolayout:1.2.0")
+    implementation("androidx.wear.protolayout:protolayout-material:1.2.0")
     implementation("androidx.wear.watchface:watchface-complications-data-source:1.2.0")
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.0")
 
