@@ -5,8 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.aethersmart.wearos.data.PairingRepository
 import com.aethersmart.wearos.data.SettingsRepository
 import com.aethersmart.wearos.data.WearSettings
+import com.aethersmart.wearos.data.WearStatusResponse
 import com.aethersmart.wearos.data.WearSummaryApi
-import com.aethersmart.wearos.data.WearSummaryResponse
 import com.aethersmart.wearos.data.toWearSettings
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 
 sealed interface UiState {
     data object Loading : UiState
-    data class Success(val data: WearSummaryResponse) : UiState
+    data class Success(val data: WearStatusResponse) : UiState
     data class Error(val message: String) : UiState
     data object NeedsSetup : UiState
 }
@@ -43,7 +43,7 @@ class WearViewModel(
             }
             _isRefreshing.value = true
             if (_uiState.value !is UiState.Success) _uiState.value = UiState.Loading
-            val result = api.fetchWearSummary(s)
+            val result = api.fetchWearStatus(s)
             result.onSuccess { _uiState.value = UiState.Success(it) }
                 .onFailure { _uiState.value = UiState.Error(it.message ?: "Unknown error") }
             _isRefreshing.value = false

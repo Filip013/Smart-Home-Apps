@@ -85,29 +85,17 @@ class AetherTileService : TileService() {
         val source = d.src
         val progress = (watts / MAX_POWER_W).coerceIn(0f, 1f)
 
-        // Header
-        val headerLeft = LayoutElementBuilders.Row.Builder()
-            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
-            .addContent(
-                LayoutElementBuilders.Image.Builder()
-                    .setResourceId("ic_zap")
-                    .setWidth(dp(15f)).setHeight(dp(15f))
-                    .setColorFilter(LayoutElementBuilders.ColorFilter.Builder().setTint(C_INDIGO).build())
-                    .build()
-            )
-            .addContent(
-                LayoutElementBuilders.Spacer.Builder().setWidth(dp(5f)).build()
-            )
-            .addContent(
-                LayoutElementBuilders.Column.Builder()
-                    .addContent(text("AetherSmart", 12f, C_TEXT, bold = true, lines = 1))
-                    .addContent(text("Smart home", 8f, C_MUTED, lines = 1))
-                    .build()
-            )
+        // Header — centered title, LIVE pill pinned right
+        val headerTitle = LayoutElementBuilders.Column.Builder()
+            .setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build())
+            .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
+            .addContent(text("AetherSmart", 13f, C_TEXT, bold = true, lines = 1))
             .build()
 
         val livePill = if (inLive)
             LayoutElementBuilders.Box.Builder()
+                .setHorizontalAlignment(LayoutElementBuilders.HORIZONTAL_ALIGN_END)
+                .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
                 .setModifiers(
                     ModifiersBuilders.Modifiers.Builder()
                         .setBackground(
@@ -123,13 +111,12 @@ class AetherTileService : TileService() {
                 .build()
             else null
 
-        val headerBuilder = LayoutElementBuilders.Row.Builder()
-            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_CENTER)
+        val headerBoxBuilder = LayoutElementBuilders.Box.Builder()
             .setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build())
-            .addContent(headerLeft)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build()).build())
-        if (livePill != null) headerBuilder.addContent(livePill)
-        val header = headerBuilder.build()
+            .setHeight(dp(20f))
+            .addContent(headerTitle)
+        if (livePill != null) headerBoxBuilder.addContent(livePill)
+        val header = headerBoxBuilder.build()
 
         // Power ring
         val sourceColor = when (source) { "tvbox" -> C_SKY; "tuya" -> C_AMBER; else -> C_MUTED }
@@ -217,9 +204,6 @@ class AetherTileService : TileService() {
             .addContent(tempCard("Vršac", d.vT, d.vH, "ic_leaf", C_EMERALD, C_EMERALD))
             .build()
 
-        // Footer hint
-        val hint = text(if (inLive) "LIVE · tap ring to extend" else "tap ring = LIVE 15s · bg = app", 8f, C_MUTED, lines = 1)
-
         val rootColumn = LayoutElementBuilders.Column.Builder()
             .setWidth(DimensionBuilders.ExpandedDimensionProp.Builder().build())
             .addContent(header)
@@ -227,8 +211,6 @@ class AetherTileService : TileService() {
             .addContent(ringBox)
             .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(6f)).build())
             .addContent(cardRow)
-            .addContent(LayoutElementBuilders.Spacer.Builder().setHeight(dp(5f)).build())
-            .addContent(hint)
             .build()
 
         // Root: full-screen click → app (clickable wraps column)
